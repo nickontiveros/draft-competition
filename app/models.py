@@ -44,6 +44,12 @@ class Account(Base):
     last_sync_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_sync_error: Mapped[str] = mapped_column(String, default="")
     deposit_flag: Mapped[str] = mapped_column(String, default="")
+    # JSON list of market keys with an open position, refreshed each sync.
+    open_markets_json: Mapped[str] = mapped_column(String, default="[]")
+
+    @property
+    def open_markets(self) -> set[str]:
+        return set(json.loads(self.open_markets_json or "[]"))
 
     participant: Mapped[Participant] = relationship(back_populates="accounts")
     baseline_snapshot: Mapped[Snapshot | None] = relationship(foreign_keys=[baseline_snapshot_id])
@@ -70,10 +76,15 @@ class Fill(Base):
     external_id: Mapped[str] = mapped_column(String(200))
     ts: Mapped[datetime] = mapped_column(index=True)
     market_title: Mapped[str] = mapped_column(String, default="")
-    outcome: Mapped[str] = mapped_column(String(80), default="")  # e.g. "Yes"/"No"
-    side: Mapped[str] = mapped_column(String(10), default="")  # "buy" | "sell"
+    outcome: Mapped[str] = mapped_column(String(120), default="")  # "Yes"/"No"/team name
+    side: Mapped[str] = mapped_column(String(10), default="")  # "buy" | "sell" | "settle"
     size: Mapped[float] = mapped_column(default=0.0)  # contracts/shares
     price: Mapped[float] = mapped_column(default=0.0)  # dollars per share (0-1)
+    # Kalshi ticker / Polymarket conditionId — groups fills into one "bet".
+    market_key: Mapped[str] = mapped_column(String(200), default="", index=True)
+    notional: Mapped[float] = mapped_column(default=0.0)  # dollars in/out for this fill
+    kind: Mapped[str] = mapped_column(String(20), default="trade")  # "trade" | "settlement"
+    category: Mapped[str] = mapped_column(String(80), default="")
     raw_json: Mapped[str] = mapped_column(String, default="{}")
 
     account: Mapped[Account] = relationship()
@@ -81,3 +92,18 @@ class Fill(Base):
     @property
     def raw(self) -> dict:
         return json.loads(self.raw_json)
+
+
+class MarketMeta(Base):
+    """Cache of per-market metadata (title, category, what YES means)."""
+
+    __tablename__ = "market_meta"
+    __table_args__ = (UniqueConstraint("platform", "market_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    platform: Mapped[str] = mapped_column(String(20))
+    market_key: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(String, default="")
+    category: Mapped[str] = mapped_column(String(80), default="")
+    yes_sub_title: Mapped[str] = mapped_column(String, default="")
+    raw_json: Mapped[str] = mapped_column(String, default="{}")

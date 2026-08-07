@@ -7,14 +7,22 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.db import db_session
+from app.models import Fill, MarketMeta
 from app.scoring import Standing, compute_standings, recent_fills
+from app.stats import fill_metas
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 
-def sparkline_svg(history: list[tuple[datetime, float]], width: int = 120, height: int = 32) -> str:
-    """Inline SVG sparkline of P&L history. Stroke color is set via CSS class."""
+def sparkline_svg(
+    history: list[tuple[datetime, float]],
+    width: int = 120,
+    height: int = 32,
+    css_class: str = "spark",
+) -> str:
+    """Inline SVG line of P&L history. Stroke color comes from CSS; a dashed
+    zero line is drawn when the values cross it."""
     if len(history) < 2:
         return ""
     values = [v for _, v in history]
@@ -26,9 +34,16 @@ def sparkline_svg(history: list[tuple[datetime, float]], width: int = 120, heigh
         x = pad + i * (width - 2 * pad) / (len(values) - 1)
         y = pad + (hi - v) * (height - 2 * pad) / span
         points.append(f"{x:.1f},{y:.1f}")
+    zero_line = ""
+    if lo < 0 < hi:
+        zy = pad + hi * (height - 2 * pad) / span
+        zero_line = (
+            f'<line x1="{pad}" y1="{zy:.1f}" x2="{width - pad}" y2="{zy:.1f}" '
+            f'class="zero" stroke-dasharray="3 3" stroke-width="1"/>'
+        )
     return (
-        f'<svg class="spark" viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
-        f'role="img" aria-label="P&L trend">'
+        f'<svg class="{css_class}" viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+        f'role="img" aria-label="P&L trend">{zero_line}'
         f'<polyline fill="none" stroke-width="2" stroke-linejoin="round" '
         f'stroke-linecap="round" points="{" ".join(points)}"/></svg>'
     )
@@ -49,11 +64,51 @@ def _ago(ts: datetime | None) -> str:
     return f"{seconds / 86400:.0f}d ago"
 
 
+def outcome_label(outcome: str, meta: MarketMeta | None) -> str:
+    sub = meta.yes_sub_title if meta else ""
+    if sub and sub != outcome:
+        if outcome == "Yes":
+            return sub
+        if outcome == "No":
+            return f"No — {sub}"
+    return outcome
+
+
+def feed_item(f: Fill, meta: MarketMeta | None) -> dict:
+    label = outcome_label(f.outcome, meta)
+    title = (meta.title if meta and meta.title else f.market_title) or f.market_key
+    base = {
+        "who": f.account.participant.name,
+        "participant_id": f.account.participant_id,
+        "platform": f.platform,
+        "category": f.category or (meta.category if meta else ""),
+        "title": title,
+        "ago": _ago(f.ts if f.ts.tzinfo else f.ts.replace(tzinfo=timezone.utc)),
+    }
+    if f.kind == "settlement":
+        if f.notional > 0:
+            base["headline"] = f"won ${f.notional:,.2f}"
+            base["tone"] = "up"
+        else:
+            base["headline"] = "lost a bet"
+            base["tone"] = "down"
+        base["detail"] = f"settled {label}" if label else "settled"
+    elif f.side == "buy":
+        base["headline"] = f"put ${f.notional:,.2f} on {label}"
+        base["tone"] = "buy"
+        base["detail"] = f"@ {f.price * 100:.0f}¢ · {f.size:.0f} contracts"
+    else:
+        base["headline"] = f"sold {label} for ${f.notional:,.2f}"
+        base["tone"] = "sell"
+        base["detail"] = f"@ {f.price * 100:.0f}¢ · {f.size:.0f} contracts"
+    return base
+
+
 def _standing_json(s: Standing) -> dict:
     return {
         "participant": s.name,
-        "current_total": round(s.current_total, 2),
-        "baseline_total": round(s.baseline_total, 2),
+        "participant_id": s.participant_id,
+        "game_value": round(s.game_value, 2),
         "pnl": round(s.pnl, 2),
         "pnl_pct": round(s.pnl_pct, 2),
         "flags": s.flags,
@@ -82,10 +137,11 @@ def api_leaderboard():
 
 
 @router.get("/", response_class=HTMLResponse)
-def leaderboard_page(request: Request):
+def leaderboard_page(request: Request, welcome: str | None = None):
     with db_session() as db:
         standings = compute_standings(db)
         fills = recent_fills(db, limit=30)
+        metas = fill_metas(db, fills)
         rows = [
             {
                 "rank": i + 1,
@@ -100,21 +156,14 @@ def leaderboard_page(request: Request):
             }
             for i, s in enumerate(standings)
         ]
-        feed = [
-            {
-                "who": f.account.participant.name,
-                "platform": f.platform,
-                "side": f.side,
-                "size": f.size,
-                "outcome": f.outcome,
-                "price": f.price,
-                "title": f.market_title,
-                "ago": _ago(f.ts),
-            }
-            for f in fills
-        ]
+        feed = [feed_item(f, metas.get((f.platform, f.market_key))) for f in fills]
         return templates.TemplateResponse(
             request,
             "leaderboard.html",
-            {"rows": rows, "feed": feed, "now": datetime.now(timezone.utc)},
+            {
+                "rows": rows,
+                "feed": feed,
+                "welcome": welcome,
+                "now": datetime.now(timezone.utc),
+            },
         )

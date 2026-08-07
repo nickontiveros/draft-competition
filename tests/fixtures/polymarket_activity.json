@@ -12,7 +12,8 @@
     "side": "BUY",
     "outcome": "Yes",
     "title": "Fed cuts rates in September?",
-    "slug": "fed-cuts-rates-september"
+    "slug": "fed-cuts-rates-september-market",
+    "eventSlug": "fed-cuts-rates-september"
   },
   {
     "proxyWallet": "0xabc0000000000000000000000000000000000001",

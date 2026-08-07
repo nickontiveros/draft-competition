@@ -22,6 +22,15 @@ class Settings:
             "POLYMARKET_DATA_URL", "https://data-api.polymarket.com"
         )
     )
+    polymarket_gamma_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "POLYMARKET_GAMMA_URL", "https://gamma-api.polymarket.com"
+        )
+    )
+    # Shared passphrase friends type on /join to add themselves.
+    signup_passphrase: str = field(
+        default_factory=lambda: os.environ.get("SIGNUP_PASSPHRASE", "")
+    )
     sync_interval_minutes: int = field(
         default_factory=lambda: int(os.environ.get("SYNC_INTERVAL_MINUTES", "5"))
     )

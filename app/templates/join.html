@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join — Prediction Draft</title>
+{% include "_tokens.html" %}
+</head>
+<body>
+<div class="wrap">
+  <div class="sub"><a href="/">← Leaderboard</a></div>
+  <h1>🎟️ Join the Prediction Draft</h1>
+  <div class="sub">$100 bankroll · 10 days · most profit wins. Your bets sync automatically every 5 minutes.</div>
+
+  {% if error %}<div class="flag">⚠️ {{ error }}</div><br>{% endif %}
+  {% if not enabled %}<div class="flag">⚠️ Signup is currently disabled — ask the organizer to set SIGNUP_PASSPHRASE.</div><br>{% endif %}
+
+  <div class="card" style="padding:1rem">
+    <h2>1 · Get your credentials</h2>
+
+    <details class="howto">
+      <summary>If you're playing on Kalshi</summary>
+      <ol>
+        <li>Log in at <strong>kalshi.com</strong> (the website, not the app).</li>
+        <li>Open <strong>Account → Settings → API Keys</strong> (kalshi.com/account/profile).</li>
+        <li>Click <strong>Create API key</strong>. When asked for permissions/scopes, select <strong>read-only</strong> — do NOT enable trade or withdraw. The tracker only ever reads your balance and bets.</li>
+        <li>Kalshi shows a <strong>Key ID</strong> and downloads a <strong>private key file</strong> (.pem / .key / .txt). Keep the file — Kalshi won't show it again.</li>
+        <li>Below: paste the Key ID as your identifier, and open the key file in any text editor and paste its full contents (starts with <code>-----BEGIN</code>) into the private key box.</li>
+      </ol>
+    </details>
+
+    <details class="howto">
+      <summary>If you're playing on Polymarket</summary>
+      <ol>
+        <li>Open Polymarket and go to your <strong>profile</strong> (tap your avatar).</li>
+        <li>Copy your <strong>wallet address</strong> — it starts with <code>0x…</code> (on the profile page, tap the address to copy it).</li>
+        <li>That's it — it's public info, no keys needed. Paste it as your identifier below.</li>
+        <li><strong>Heads-up:</strong> some accounts created in the US iOS app don't show up in Polymarket's public data yet. If your bankroll reads $0.00 after joining despite having funds, ask the organizer to check — you may need to play on Kalshi instead.</li>
+      </ol>
+    </details>
+  </div>
+
+  <form method="post" action="/join">
+    <fieldset>
+      <legend>2 · Sign up</legend>
+      <label>Game passphrase (ask the organizer)</label>
+      <input name="passphrase" type="password" required autocomplete="off">
+      <label>Your name (as it should appear on the leaderboard)</label>
+      <input name="name" required maxlength="40">
+      <label>Platform</label>
+      <select name="platform" id="platform" onchange="toggleKey()">
+        <option value="polymarket">Polymarket</option>
+        <option value="kalshi">Kalshi</option>
+      </select>
+      <label id="ident-label">Wallet address (0x…)</label>
+      <input name="identifier" required autocomplete="off">
+      <div id="key-block" style="display:none">
+        <label>Kalshi private key file contents</label>
+        <textarea name="private_key_pem" rows="5" placeholder="-----BEGIN PRIVATE KEY-----&#10;..." autocomplete="off"></textarea>
+        <div class="muted">Stored encrypted; used only with your read-only key to sync bets.</div>
+      </div>
+      <button>Join the game</button>
+    </fieldset>
+  </form>
+
+  <div class="footer">
+    Rules: fund your account with $100, no deposits during the game (the tracker flags them),
+    P&amp;L counts from the moment you join. Playing on both platforms? Sign up once per platform with the same name.
+  </div>
+</div>
+<script>
+function toggleKey() {
+  const kalshi = document.getElementById('platform').value === 'kalshi';
+  document.getElementById('key-block').style.display = kalshi ? '' : 'none';
+  document.getElementById('ident-label').textContent =
+    kalshi ? 'Kalshi API Key ID' : 'Wallet address (0x…)';
+}
+</script>
+</body>
+</html>

@@ -4,97 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Prediction Draft — Leaderboard</title>
-<style>
-  :root {
-    color-scheme: light;
-    --page: #f9f9f7;
-    --surface: #fcfcfb;
-    --ink: #0b0b0b;
-    --ink-2: #52514e;
-    --muted: #898781;
-    --grid: #e1e0d9;
-    --border: rgba(11, 11, 11, 0.10);
-    --series-1: #2a78d6;
-    --up: #006300;
-    --down: #d03b3b;
-    --flag-bg: #fdf3e2;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      color-scheme: dark;
-      --page: #0d0d0d;
-      --surface: #1a1a19;
-      --ink: #ffffff;
-      --ink-2: #c3c2b7;
-      --muted: #898781;
-      --grid: #2c2c2a;
-      --border: rgba(255, 255, 255, 0.10);
-      --series-1: #3987e5;
-      --up: #0ca30c;
-      --down: #e66767;
-      --flag-bg: #33290f;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 1.2rem;
-    background: var(--page); color: var(--ink);
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  }
-  .wrap { max-width: 780px; margin: 0 auto; }
-  h1 { font-size: 1.35rem; margin: 0 0 .2rem; }
-  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 1.2rem; }
-  .card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 12px; padding: .4rem .9rem; margin-bottom: 1.4rem;
-    overflow-x: auto;
-  }
-  table { border-collapse: collapse; width: 100%; }
-  th {
-    text-align: left; color: var(--muted); font-size: .75rem;
-    font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-    padding: .6rem .5rem; border-bottom: 1px solid var(--grid);
-  }
-  td { padding: .55rem .5rem; border-bottom: 1px solid var(--grid); vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-  .rank { color: var(--ink-2); width: 2rem; }
-  .name { font-weight: 600; }
-  .badges { margin-top: .15rem; }
-  .badge {
-    display: inline-block; font-size: .68rem; color: var(--ink-2);
-    border: 1px solid var(--grid); border-radius: 999px;
-    padding: 0 .5em; margin-right: .3em;
-  }
-  .pnl-up { color: var(--up); font-weight: 600; }
-  .pnl-down { color: var(--down); font-weight: 600; }
-  .spark polyline { stroke: var(--series-1); }
-  .synced { color: var(--muted); font-size: .75rem; white-space: nowrap; }
-  .flag {
-    background: var(--flag-bg); border-radius: 6px; font-size: .75rem;
-    color: var(--ink-2); padding: .25rem .5rem; margin: .3rem 0 0;
-  }
-  h2 { font-size: 1rem; margin: 0 0 .2rem; }
-  ul.feed { list-style: none; margin: 0; padding: 0; }
-  ul.feed li { padding: .55rem 0; border-bottom: 1px solid var(--grid); font-size: .9rem; }
-  ul.feed li:last-child { border-bottom: none; }
-  .feed .meta { color: var(--muted); font-size: .75rem; }
-  .feed .buy { color: var(--up); font-weight: 600; }
-  .feed .sell { color: var(--down); font-weight: 600; }
-  .empty { color: var(--muted); padding: 1rem .2rem; font-size: .9rem; }
-</style>
+{% include "_tokens.html" %}
 </head>
 <body>
 <div class="wrap">
   <h1>🏆 Prediction Draft — Leaderboard</h1>
-  <div class="sub">P&amp;L since baseline · auto-refreshes every 60s · as of {{ now.strftime("%b %-d, %H:%M") }} UTC</div>
+  <div class="sub">$100 bankroll + P&amp;L since joining · auto-refreshes every 60s · as of {{ now.strftime("%b %-d, %H:%M") }} UTC</div>
+
+  {% if welcome %}
+  <div class="banner">🎉 Welcome, <strong>{{ welcome }}</strong> — you're on the board at $100.00. Go make it grow.</div>
+  {% endif %}
 
   <div class="card">
     {% if rows %}
     <table>
       <thead>
         <tr>
-          <th></th><th>Player</th><th style="text-align:right">Value</th>
+          <th></th><th>Player</th><th style="text-align:right">Bankroll</th>
           <th style="text-align:right">P&amp;L</th><th style="text-align:right">%</th>
           <th>Trend</th><th></th>
         </tr>
@@ -102,15 +28,15 @@
       <tbody>
         {% for r in rows %}
         <tr>
-          <td class="rank num">{{ r.rank }}</td>
+          <td class="num muted">{{ r.rank }}</td>
           <td>
-            <span class="name">{{ r.s.name }}</span>
-            <div class="badges">
+            <a class="name" href="/player/{{ r.s.participant_id }}">{{ r.s.name }}</a>
+            <div>
               {% for a in r.s.accounts %}<span class="badge">{{ a.platform }}</span>{% endfor %}
             </div>
             {% for f in r.s.flags %}<div class="flag">⚠️ {{ f }}</div>{% endfor %}
           </td>
-          <td class="num">${{ "%.2f"|format(r.s.current_total) }}</td>
+          <td class="num">${{ "%.2f"|format(r.s.game_value) }}</td>
           <td class="num {{ 'pnl-up' if r.s.pnl >= 0 else 'pnl-down' }}">
             {{ "+" if r.s.pnl >= 0 }}${{ "%.2f"|format(r.s.pnl) }}
           </td>
@@ -118,13 +44,13 @@
             {{ "+" if r.s.pnl_pct >= 0 }}{{ "%.1f"|format(r.s.pnl_pct) }}%
           </td>
           <td>{{ r.spark | safe }}</td>
-          <td class="synced">{{ r.synced }}</td>
+          <td class="muted">{{ r.synced }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     {% else %}
-    <div class="empty">No participants yet — add them on the <a href="/admin">admin page</a>.</div>
+    <div class="empty">No players yet — <a href="/join">join the game</a> or add accounts on the <a href="/admin">admin page</a>.</div>
     {% endif %}
   </div>
 
@@ -134,11 +60,10 @@
     <ul class="feed">
       {% for f in feed %}
       <li>
-        <span class="name">{{ f.who }}</span>
-        <span class="{{ 'buy' if f.side == 'buy' else 'sell' }}">{{ f.side or "traded" }}</span>
-        {{ "%.0f"|format(f.size) }}× {{ f.outcome }} @ {{ "%.0f"|format(f.price * 100) }}¢
+        <a class="name" href="/player/{{ f.participant_id }}">{{ f.who }}</a>
+        <span class="{{ f.tone }}">{{ f.headline }}</span>
         — “{{ f.title }}”
-        <div class="meta">{{ f.platform }} · {{ f.ago }}</div>
+        <div class="muted">{{ f.detail }} · {{ f.platform }}{% if f.category %} · {{ f.category }}{% endif %} · {{ f.ago }}</div>
       </li>
       {% endfor %}
     </ul>
@@ -146,7 +71,12 @@
     <div class="empty">No bets synced yet.</div>
     {% endif %}
   </div>
+
+  <div class="footer">New player? <a href="/join">Join the game →</a></div>
 </div>
-<script>setTimeout(() => location.reload(), 60_000);</script>
+<script>
+  if (!location.search.includes('welcome')) setTimeout(() => location.reload(), 60_000);
+  else setTimeout(() => location.href = '/', 60_000);
+</script>
 </body>
 </html>

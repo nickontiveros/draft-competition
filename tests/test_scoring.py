@@ -19,15 +19,22 @@ def memory_db():
 
 
 class StubConnector:
-    def __init__(self, state: AccountState, fills=None):
+    def __init__(self, state: AccountState, fills=None, settlements=None):
         self.state = state
         self.fills = fills or []
+        self.settlements = settlements or []
 
     async def fetch_state(self):
         return self.state
 
     async def fetch_fills(self, since=None):
         return self.fills
+
+    async def fetch_settlements(self, since=None):
+        return self.settlements
+
+    async def fetch_market_meta(self, keys, hints=None):
+        return {}
 
 
 def seed(name: str, platform: str = "polymarket") -> int:
@@ -76,8 +83,43 @@ async def test_baseline_pnl_and_ranking(monkeypatch):
     assert [s.name for s in standings] == ["alice", "bob"]
     assert standings[0].pnl == pytest.approx(25.0)
     assert standings[0].pnl_pct == pytest.approx(25.0)
+    assert standings[0].game_value == pytest.approx(125.0)
     assert standings[1].pnl == pytest.approx(-10.0)
+    assert standings[1].game_value == pytest.approx(90.0)
     assert standings[1].history[-1][1] == pytest.approx(-10.0)
+
+
+async def test_auto_baseline_on_first_sync(monkeypatch):
+    """The $100 game starts at an account's first snapshot — no admin action needed."""
+    alice = seed("alice")
+    await sync_with(alice, StubConnector(AccountState(cash=350, positions_value=150)), monkeypatch)
+
+    with db_session() as db:
+        standings = compute_standings(db)
+    # A rich real account still enters the game at exactly $100.
+    assert standings[0].pnl == pytest.approx(0.0)
+    assert standings[0].game_value == pytest.approx(100.0)
+
+    await sync_with(alice, StubConnector(AccountState(cash=350, positions_value=175)), monkeypatch)
+    with db_session() as db:
+        standings = compute_standings(db)
+    assert standings[0].game_value == pytest.approx(125.0)
+
+
+async def test_auto_baseline_uses_earliest_snapshot(monkeypatch):
+    """Accounts synced before this feature keep the P&L accrued since onboarding."""
+    alice = seed("alice")
+    await sync_with(alice, StubConnector(AccountState(cash=100, positions_value=0)), monkeypatch)
+    # Simulate a pre-feature DB: baseline was never stamped.
+    with db_session() as db:
+        account = db.get(Account, alice)
+        account.baseline_snapshot_id = None
+    await sync_with(alice, StubConnector(AccountState(cash=100, positions_value=12)), monkeypatch)
+
+    with db_session() as db:
+        standings = compute_standings(db)
+    assert standings[0].pnl == pytest.approx(12.0)
+    assert standings[0].game_value == pytest.approx(112.0)
 
 
 async def test_fill_dedup(monkeypatch):

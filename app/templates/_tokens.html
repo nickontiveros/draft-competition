@@ -1,0 +1,127 @@
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --border: rgba(11, 11, 11, 0.10);
+    --series-1: #2a78d6;
+    --up: #006300;
+    --down: #d03b3b;
+    --flag-bg: #fdf3e2;
+    --chip-open: #e8f0fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-1: #3987e5;
+      --up: #0ca30c;
+      --down: #e66767;
+      --flag-bg: #33290f;
+      --chip-open: #1c2c40;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.2rem;
+    background: var(--page); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .2rem; }
+  h2 { font-size: 1rem; margin: 0 0 .2rem; }
+  a { color: var(--series-1); text-decoration: none; }
+  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 1.2rem; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: .4rem .9rem; margin-bottom: 1.4rem;
+    overflow-x: auto;
+  }
+  table { border-collapse: collapse; width: 100%; }
+  th {
+    text-align: left; color: var(--muted); font-size: .75rem;
+    font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    padding: .6rem .5rem; border-bottom: 1px solid var(--grid);
+  }
+  td { padding: .55rem .5rem; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .name { font-weight: 600; color: var(--ink); }
+  .badge {
+    display: inline-block; font-size: .68rem; color: var(--ink-2);
+    border: 1px solid var(--grid); border-radius: 999px;
+    padding: 0 .5em; margin-right: .3em;
+  }
+  .pnl-up { color: var(--up); font-weight: 600; }
+  .pnl-down { color: var(--down); font-weight: 600; }
+  .spark polyline, .chart polyline { stroke: var(--series-1); }
+  .spark .zero, .chart .zero { stroke: var(--muted); }
+  .muted { color: var(--muted); font-size: .75rem; }
+  .flag {
+    background: var(--flag-bg); border-radius: 6px; font-size: .75rem;
+    color: var(--ink-2); padding: .25rem .5rem; margin: .3rem 0 0;
+  }
+  ul.feed { list-style: none; margin: 0; padding: 0; }
+  ul.feed li { padding: .55rem 0; border-bottom: 1px solid var(--grid); font-size: .9rem; }
+  ul.feed li:last-child { border-bottom: none; }
+  .feed .up, .feed .buy { color: var(--up); font-weight: 600; }
+  .feed .down, .feed .sell { color: var(--down); font-weight: 600; }
+  .empty { color: var(--muted); padding: 1rem .2rem; font-size: .9rem; }
+  .banner {
+    background: var(--chip-open); border: 1px solid var(--border); border-radius: 10px;
+    padding: .6rem .9rem; margin-bottom: 1rem; font-size: .9rem;
+  }
+  .chip {
+    display: inline-block; font-size: .7rem; font-weight: 600; border-radius: 999px;
+    padding: .1em .6em; white-space: nowrap;
+  }
+  .chip.open { background: var(--chip-open); color: var(--series-1); }
+  .chip.won { color: var(--up); border: 1px solid var(--up); }
+  .chip.lost { color: var(--down); border: 1px solid var(--down); }
+  .chip.pre-game { color: var(--muted); border: 1px solid var(--grid); }
+  fieldset { border: 1px solid var(--grid); border-radius: 10px; margin: 0 0 1.2rem; padding: 1rem; }
+  legend { font-size: .85rem; color: var(--ink-2); padding: 0 .3em; }
+  label { display: block; margin: .6rem 0 .2rem; font-size: .9rem; }
+  input, textarea, select {
+    width: 100%; padding: .45rem; border: 1px solid var(--grid); border-radius: 6px;
+    background: var(--surface); color: var(--ink); font: inherit;
+  }
+  button {
+    margin-top: .8rem; padding: .5rem 1rem; border: none; border-radius: 6px;
+    background: var(--series-1); color: #fff; font-size: 1rem; cursor: pointer;
+  }
+  button.danger { background: var(--down); font-size: .75rem; padding: .25rem .6rem; margin: 0; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .7rem; margin-bottom: 1.4rem; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: .7rem .9rem;
+  }
+  .tile .label { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: 1.25rem; font-weight: 650; margin-top: .15rem; }
+  .tile .hint { color: var(--muted); font-size: .72rem; margin-top: .1rem; }
+  .catbar { display: flex; align-items: center; gap: .6rem; padding: .35rem 0; font-size: .85rem; }
+  .catbar .cname { width: 7.5rem; flex-shrink: 0; }
+  .catbar .track { flex: 1; height: 8px; border-radius: 4px; background: var(--grid); overflow: hidden; }
+  .catbar .fillbar { height: 100%; border-radius: 4px; background: var(--series-1); }
+  .catbar .amt { width: 7rem; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); flex-shrink: 0; }
+  @media (max-width: 480px) {
+    body { padding: .8rem; }
+    .card { padding: .3rem .55rem; }
+    th, td { padding-left: .3rem; padding-right: .3rem; }
+    table { font-size: .85rem; }
+  }
+  details.howto { margin: .6rem 0; }
+  details.howto summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+  details.howto ol { font-size: .85rem; color: var(--ink-2); padding-left: 1.2rem; }
+  .footer { color: var(--muted); font-size: .8rem; margin-top: 1.5rem; }
+</style>

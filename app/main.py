@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.db import init_db
-from app.routes import admin, leaderboard
+from app.routes import admin, join, leaderboard, player
 from app.sync import run_sync_all
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -54,4 +54,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Prediction Draft Tracker", lifespan=lifespan)
 app.include_router(leaderboard.router)
+app.include_router(player.router)
+app.include_router(join.router)
 app.include_router(admin.router)

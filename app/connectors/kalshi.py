@@ -23,7 +23,28 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 from app.config import settings
-from app.connectors.base import AccountState, NormalizedFill
+from app.connectors.base import AccountState, MarketInfo, NormalizedFill
+
+# Series-ticker prefixes -> sport, for when Kalshi's category is just "Sports".
+SERIES_SPORTS = {
+    "KXMLB": "Baseball",
+    "KXNBA": "Basketball",
+    "KXNCAAB": "Basketball",
+    "KXWNBA": "Basketball",
+    "KXNFL": "Football",
+    "KXNCAAF": "Football",
+    "KXNHL": "Hockey",
+    "KXATP": "Tennis",
+    "KXWTA": "Tennis",
+    "KXPGA": "Golf",
+    "KXLIV": "Golf",
+    "KXUFC": "MMA",
+    "KXEPL": "Soccer",
+    "KXUCL": "Soccer",
+    "KXMLS": "Soccer",
+    "KXF1": "Motorsport",
+    "KXNASCAR": "Motorsport",
+}
 
 
 def sign_pss(private_key_pem: str, message: str) -> str:
@@ -91,39 +112,101 @@ class KalshiConnector:
                 positions_value += count * last / 100
             else:  # NO contracts
                 positions_value += -count * (100 - last) / 100
-        return AccountState(cash=cash, positions_value=positions_value)
+        return AccountState(
+            cash=cash,
+            positions_value=positions_value,
+            open_market_keys=set(open_positions),
+        )
 
-    async def _last_prices(self, tickers: list[str]) -> dict[str, int]:
-        prices: dict[str, int] = {}
+    async def _markets(self, tickers: list[str]) -> dict[str, dict]:
+        markets: dict[str, dict] = {}
         for i in range(0, len(tickers), 20):
             batch = tickers[i : i + 20]
             data = await self._get("/markets", {"tickers": ",".join(batch)})
             for m in data.get("markets", []):
-                prices[m["ticker"]] = m.get("last_price", 0)
-        return prices
+                markets[m["ticker"]] = m
+        return markets
+
+    async def _last_prices(self, tickers: list[str]) -> dict[str, int]:
+        return {t: m.get("last_price", 0) for t, m in (await self._markets(tickers)).items()}
 
     async def fetch_fills(self, since: datetime | None = None) -> list[NormalizedFill]:
         params: dict = {"limit": 100}
         if since is not None:
             params["min_ts"] = int(since.timestamp())
-        data = await self._get("/portfolio/fills", params)
-        fills = []
-        for f in data.get("fills", []):
-            side = f.get("side", "yes")  # "yes" | "no"
-            price_cents = f.get("yes_price", 0) if side == "yes" else f.get("no_price", 0)
-            fills.append(
+        fills: list[NormalizedFill] = []
+        cursor = None
+        while True:
+            if cursor:
+                params["cursor"] = cursor
+            data = await self._get("/portfolio/fills", params)
+            for f in data.get("fills", []):
+                side = f.get("side", "yes")  # "yes" | "no"
+                price_cents = f.get("yes_price", 0) if side == "yes" else f.get("no_price", 0)
+                fills.append(
+                    NormalizedFill(
+                        external_id=f.get("trade_id") or f.get("fill_id", ""),
+                        ts=_parse_time(f.get("created_time", "")),
+                        market_title=f.get("ticker", ""),
+                        outcome=side.capitalize(),
+                        side=f.get("action", "").lower(),  # "buy" | "sell"
+                        size=float(f.get("count", 0)),
+                        price=price_cents / 100,
+                        market_key=f.get("ticker", ""),
+                        raw=f,
+                    )
+                )
+            cursor = data.get("cursor")
+            if not cursor:
+                break
+        return fills
+
+    async def fetch_settlements(self, since: datetime | None = None) -> list[NormalizedFill]:
+        params: dict = {"limit": 100}
+        if since is not None:
+            params["min_ts"] = int(since.timestamp())
+        data = await self._get("/portfolio/settlements", params)
+        out = []
+        for s in data.get("settlements", []):
+            ticker = s.get("ticker", "")
+            size = float(s.get("yes_count", 0) or 0) + float(s.get("no_count", 0) or 0)
+            revenue = float(s.get("revenue", 0)) / 100  # cents -> dollars paid out
+            settled = _parse_time(s.get("settled_time", ""))
+            out.append(
                 NormalizedFill(
-                    external_id=f.get("trade_id") or f.get("fill_id", ""),
-                    ts=_parse_time(f.get("created_time", "")),
-                    market_title=f.get("ticker", ""),
-                    outcome=side.capitalize(),
-                    side=f.get("action", "").lower(),  # "buy" | "sell"
-                    size=float(f.get("count", 0)),
-                    price=price_cents / 100,
-                    raw=f,
+                    external_id=f"settle-{ticker}-{s.get('settled_time', '')}",
+                    ts=settled,
+                    market_title=ticker,
+                    outcome=str(s.get("market_result", "")).capitalize(),
+                    side="settle",
+                    size=size,
+                    price=(revenue / size) if size else 0.0,
+                    market_key=ticker,
+                    kind="settlement",
+                    notional=revenue,
+                    raw=s,
                 )
             )
-        return fills
+        return out
+
+    async def fetch_market_meta(
+        self, keys: list[str], hints: dict[str, dict] | None = None
+    ) -> dict[str, MarketInfo]:
+        markets = await self._markets(keys)
+        out: dict[str, MarketInfo] = {}
+        for key in keys:
+            m = markets.get(key, {})
+            category = m.get("category", "") or "Other"
+            series_prefix = key.split("-")[0].upper()
+            if series_prefix in SERIES_SPORTS and category in ("Sports", "Other"):
+                category = SERIES_SPORTS[series_prefix]
+            out[key] = MarketInfo(
+                title=m.get("title", key),
+                category=category,
+                yes_sub_title=m.get("yes_sub_title", ""),
+                raw=m,
+            )
+        return out
 
 
 def _parse_time(value: str) -> datetime:

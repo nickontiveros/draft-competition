@@ -1,7 +1,26 @@
 {
   "markets": [
-    { "ticker": "FED-25SEP-CUT", "last_price": 70 },
-    { "ticker": "CPI-26AUG-A3", "last_price": 40 }
+    {
+      "ticker": "FED-25SEP-CUT",
+      "last_price": 70,
+      "title": "Fed cuts rates in September?",
+      "category": "Economics",
+      "yes_sub_title": "Rates cut by 25bps or more"
+    },
+    {
+      "ticker": "CPI-26AUG-A3",
+      "last_price": 40,
+      "title": "CPI above 3.0% in August?",
+      "category": "Economics",
+      "yes_sub_title": ""
+    },
+    {
+      "ticker": "KXMLB-26AUG07-NYY",
+      "last_price": 55,
+      "title": "Yankees beat the Red Sox tonight?",
+      "category": "Sports",
+      "yes_sub_title": "Yankees win"
+    }
   ],
   "cursor": ""
 }

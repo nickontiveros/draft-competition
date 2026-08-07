@@ -41,8 +41,14 @@ class Standing:
         return self.current_total - self.baseline_total
 
     @property
+    def game_value(self) -> float:
+        """The $100-game bankroll: starting stake plus P&L since baseline.
+        Independent of how much real money sits in the underlying accounts."""
+        return settings.starting_bankroll + self.pnl
+
+    @property
     def pnl_pct(self) -> float:
-        base = self.baseline_total or settings.starting_bankroll
+        base = settings.starting_bankroll
         return 100 * self.pnl / base if base else 0.0
 
     @property

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracker admin</title>
+{% include "_tokens.html" %}
+</head>
+<body>
+<div class="wrap" style="max-width:620px">
+  <div class="sub"><a href="/">← Leaderboard</a></div>
+  <h1>Tracker admin</h1>
+  <div class="sub">Players can self-serve at <a href="/join">/join</a> with the game passphrase.</div>
+
+  <form method="get" action="/admin">
+    <fieldset>
+      <legend>Manage players</legend>
+      {% if not authed %}
+      <label>Admin token (to view the player list)</label>
+      <input name="token" type="password" required>
+      <button>Show players</button>
+      {% else %}
+      {% if participants %}
+      <table>
+        <thead><tr><th>Player</th><th>Account</th><th>Last sync</th><th></th></tr></thead>
+        <tbody>
+          {% for p in participants %}{% for a in p.accounts %}
+          <tr>
+            <td class="name">{{ p.name }}</td>
+            <td>
+              <span class="badge">{{ a.platform }}</span>
+              <span class="muted">{{ a.identifier[:14] }}{% if a.identifier|length > 14 %}…{% endif %}</span>
+              {% if a.last_sync_error %}<div class="flag">⚠️ {{ a.last_sync_error[:120] }}</div>{% endif %}
+            </td>
+            <td class="muted">{{ a.last_sync_at.strftime("%m-%d %H:%M") if a.last_sync_at else "never" }}</td>
+            <td>
+              <form method="post" action="/admin/accounts/{{ a.id }}/delete"
+                    onsubmit="return confirm('Remove {{ p.name }} ({{ a.platform }})? This deletes their history.')">
+                <input type="hidden" name="token" value="{{ token }}">
+                <button class="danger">remove</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}{% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">No players yet.</div>
+      {% endif %}
+      {% endif %}
+    </fieldset>
+  </form>
+
+  <form method="post" action="/admin/participants">
+    <fieldset>
+      <legend>Add player account manually</legend>
+      <label>Admin token</label><input name="token" type="password" required value="{{ token }}">
+      <label>Participant name</label><input name="name" required>
+      <label>Platform</label>
+      <select name="platform"><option>polymarket</option><option>kalshi</option></select>
+      <label>Identifier (Polymarket wallet address / Kalshi API key ID)</label>
+      <input name="identifier" required>
+      <label>Kalshi RSA private key PEM (kalshi only)</label>
+      <textarea name="private_key_pem" rows="4" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+      <button>Add account</button>
+    </fieldset>
+  </form>
+
+  <form method="post" action="/admin/sync">
+    <fieldset>
+      <legend>Force sync now</legend>
+      <label>Admin token</label><input name="token" type="password" required value="{{ token }}">
+      <button>Sync all accounts</button>
+    </fieldset>
+  </form>
+
+  <form method="post" action="/admin/lock-baselines">
+    <fieldset>
+      <legend>Reset all baselines (restart the game at $100 for everyone)</legend>
+      <label>Admin token</label><input name="token" type="password" required value="{{ token }}">
+      <button>Snapshot &amp; lock baselines</button>
+    </fieldset>
+  </form>
+</div>
+</body>
+</html>

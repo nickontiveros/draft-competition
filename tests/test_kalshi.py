@@ -56,10 +56,14 @@ def make_transport(rsa_public_key):
         if route == "/portfolio/positions":
             return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_positions.json").read_text()))
         if route == "/markets":
-            assert set(request.url.params["tickers"].split(",")) == {"FED-25SEP-CUT", "CPI-26AUG-A3"}
-            return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_markets.json").read_text()))
+            requested = set(request.url.params["tickers"].split(","))
+            data = json.loads((FIXTURES / "kalshi_markets.json").read_text())
+            data["markets"] = [m for m in data["markets"] if m["ticker"] in requested]
+            return httpx.Response(200, json=data)
         if route == "/portfolio/fills":
             return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_fills.json").read_text()))
+        if route == "/portfolio/settlements":
+            return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_settlements.json").read_text()))
         raise AssertionError(f"unexpected route {route}")
 
     return httpx.MockTransport(handler)
@@ -78,6 +82,34 @@ async def test_fetch_state(connector):
     # 25 YES @ 70c = 17.50, plus 10 NO with yes last_price 40c -> 10 * 0.60 = 6.00
     assert state.positions_value == pytest.approx(23.50)
     assert state.total == pytest.approx(62.49)
+    assert state.open_market_keys == {"FED-25SEP-CUT", "CPI-26AUG-A3"}
+
+
+async def test_fetch_settlements(connector):
+    settlements = await connector.fetch_settlements()
+    assert len(settlements) == 2
+    win = next(s for s in settlements if s.market_key == "KXMLB-26AUG07-NYY")
+    assert win.kind == "settlement"
+    assert win.notional == pytest.approx(20.0)  # 2000 cents revenue
+    assert win.size == 20
+    loss = next(s for s in settlements if s.market_key == "CPI-26JUL-A3")
+    assert loss.notional == 0.0
+
+
+async def test_market_meta_titles_categories_and_sport_mapping(connector):
+    metas = await connector.fetch_market_meta(
+        ["FED-25SEP-CUT", "KXMLB-26AUG07-NYY", "GONE-MKT"]
+    )
+    fed = metas["FED-25SEP-CUT"]
+    assert fed.title == "Fed cuts rates in September?"
+    assert fed.category == "Economics"
+    assert fed.yes_sub_title == "Rates cut by 25bps or more"
+    # Kalshi says "Sports"; the series prefix refines it to the actual sport.
+    assert metas["KXMLB-26AUG07-NYY"].category == "Baseball"
+    assert metas["KXMLB-26AUG07-NYY"].yes_sub_title == "Yankees win"
+    # Unknown market degrades to ticker-as-title.
+    assert metas["GONE-MKT"].title == "GONE-MKT"
+    assert metas["GONE-MKT"].category == "Other"
 
 
 async def test_fetch_fills_normalization(connector):

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ p.name }} — Prediction Draft</title>
+{% include "_tokens.html" %}
+</head>
+<body>
+<div class="wrap">
+  <div class="sub"><a href="/">← Leaderboard</a></div>
+  <h1>{{ p.name }} {% if rank %}<span class="muted">· #{{ rank }}</span>{% endif %}</h1>
+  <div class="sub">
+    {% for a in p.accounts %}<span class="badge">{{ a.platform }}</span>{% endfor %}
+  </div>
+
+  {% if s %}
+  <div class="tiles">
+    <div class="tile">
+      <div class="label">Bankroll</div>
+      <div class="value">${{ "%.2f"|format(s.game_value) }}</div>
+      <div class="hint {{ 'pnl-up' if s.pnl >= 0 else 'pnl-down' }}">
+        {{ "+" if s.pnl >= 0 }}${{ "%.2f"|format(s.pnl) }} ({{ "+" if s.pnl_pct >= 0 }}{{ "%.1f"|format(s.pnl_pct) }}%)
+      </div>
+    </div>
+    <div class="tile">
+      <div class="label">Total wagered</div>
+      <div class="value">${{ "%.2f"|format(stats.total_wagered) }}</div>
+      <div class="hint">{{ stats.bets_placed }} bet{{ "s" if stats.bets_placed != 1 }}</div>
+    </div>
+    <div class="tile">
+      <div class="label">Win rate</div>
+      <div class="value">{% if stats.win_rate is not none %}{{ "%.0f"|format(stats.win_rate) }}%{% else %}—{% endif %}</div>
+      <div class="hint">{{ stats.wins }}W · {{ stats.losses }}L settled</div>
+    </div>
+    <div class="tile">
+      <div class="label">Best / worst</div>
+      <div class="value">
+        {% if stats.biggest_win %}<span class="pnl-up">+${{ "%.2f"|format(stats.biggest_win.pnl) }}</span>{% else %}—{% endif %}
+      </div>
+      <div class="hint">
+        {% if stats.biggest_loss %}worst <span class="pnl-down">-${{ "%.2f"|format(-stats.biggest_loss.pnl) }}</span>{% else %}no losses yet{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if chart %}
+  <h2>P&amp;L since joining</h2>
+  <div class="card" style="padding:.9rem">{{ chart | safe }}</div>
+  {% endif %}
+  {% endif %}
+
+  {% if stats.categories %}
+  <h2>By category</h2>
+  <div class="card" style="padding:.7rem .9rem">
+    {% for c in stats.categories %}
+    <div class="catbar">
+      <span class="cname">{{ c.name }}</span>
+      <div class="track"><div class="fillbar" style="width: {{ (100 * c.wagered / max_cat_wagered) if max_cat_wagered else 0 }}%"></div></div>
+      <span class="amt">${{ "%.2f"|format(c.wagered) }}{% if c.wins + c.losses %} · {{ c.wins }}W {{ c.losses }}L{% endif %}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <h2>Bets</h2>
+  <div class="card">
+    {% if stats.entries %}
+    <table>
+      <thead>
+        <tr>
+          <th>Market</th><th>Position</th>
+          <th style="text-align:right">Wagered</th>
+          <th style="text-align:right">Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in stats.entries %}
+        <tr>
+          <td>
+            {{ b.title }}
+            <div class="muted">{{ b.platform }}{% if b.category %} · {{ b.category }}{% endif %} · {{ ago(b.last_ts) }}</div>
+          </td>
+          <td>
+            {{ b.outcome_label }}
+            {% if b.avg_price %}<div class="muted">@ {{ "%.0f"|format(b.avg_price * 100) }}¢ avg</div>{% endif %}
+          </td>
+          <td class="num">{% if b.wagered %}${{ "%.2f"|format(b.wagered) }}{% else %}—{% endif %}</td>
+          <td class="num">
+            <span class="chip {{ b.status }}">{{ b.status }}</span>
+            {% if b.pnl is not none %}
+              <div class="{{ 'pnl-up' if b.pnl >= 0 else 'pnl-down' }}">{{ "+" if b.pnl >= 0 }}${{ "%.2f"|format(b.pnl) }}</div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No bets synced yet.</div>
+    {% endif %}
+  </div>
+
+  {% if s %}
+  <div class="footer">
+    Real account totals:
+    {% for a in s.accounts %}
+      {{ a.platform }} {% if a.current_total is not none %}${{ "%.2f"|format(a.current_total) }}{% else %}—{% endif %}{{ " · " if not loop.last }}
+    {% endfor %}
+    — the game tracks P&amp;L against the $100 bankroll, not these balances.
+    Pre-game bets are shown but excluded from stats.
+  </div>
+  {% endif %}
+</div>
+</body>
+</html>

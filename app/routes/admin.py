@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Form, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.credentials import seal
@@ -41,21 +42,39 @@ async def add_participant(
     if platform == "kalshi" and not private_key_pem.strip():
         raise HTTPException(400, "kalshi accounts need the RSA private key PEM")
 
-    with db_session() as db:
-        participant = db.query(Participant).filter_by(name=name.strip()).first()
-        if participant is None:
-            participant = Participant(name=name.strip())
-            db.add(participant)
+    if private_key_pem.strip():
+        try:
+            credentials = seal(private_key_pem.strip())
+        except Exception as exc:  # invalid CRED_SECRET (must be a Fernet key)
+            raise HTTPException(
+                500,
+                "CRED_SECRET is misconfigured — it must be a Fernet key, generate one "
+                'with: python -c "from cryptography.fernet import Fernet; '
+                f'print(Fernet.generate_key().decode())" ({exc})',
+            )
+    else:
+        credentials = ""
+
+    try:
+        with db_session() as db:
+            participant = db.query(Participant).filter_by(name=name.strip()).first()
+            if participant is None:
+                participant = Participant(name=name.strip())
+                db.add(participant)
+                db.flush()
+            account = Account(
+                participant_id=participant.id,
+                platform=platform,
+                identifier=identifier.strip(),
+                credentials=credentials,
+            )
+            db.add(account)
             db.flush()
-        account = Account(
-            participant_id=participant.id,
-            platform=platform,
-            identifier=identifier.strip(),
-            credentials=seal(private_key_pem.strip()) if private_key_pem.strip() else "",
+            account_id = account.id
+    except IntegrityError:
+        raise HTTPException(
+            409, f"a {platform} account with identifier {identifier.strip()!r} already exists"
         )
-        db.add(account)
-        db.flush()
-        account_id = account.id
 
     return {"ok": True, "account_id": account_id}
 

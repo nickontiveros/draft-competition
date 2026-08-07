@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.config import settings
 from app.models import Base
@@ -15,8 +16,17 @@ _SessionLocal = None
 def init_db(db_path: str | None = None):
     global _engine, _SessionLocal
     path = db_path or settings.db_path
-    url = f"sqlite:///{path}" if path != ":memory:" else "sqlite://"
-    _engine = create_engine(url, connect_args={"check_same_thread": False})
+    if path == ":memory:":
+        # One shared connection, or each thread would see its own empty DB.
+        _engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        _engine = create_engine(
+            f"sqlite:///{path}", connect_args={"check_same_thread": False}
+        )
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
     Base.metadata.create_all(_engine)
     return _engine

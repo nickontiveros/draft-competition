@@ -44,18 +44,25 @@ uvicorn app.main:app --port 8080
 
 Tests: `pytest`
 
-## Deploying (Fly.io example)
+## Deploying (Railway)
 
-```bash
-fly launch --copy-config --no-deploy
-fly volumes create tracker_data --size 1
-fly secrets set ADMIN_TOKEN=$(openssl rand -hex 16) \
-  CRED_SECRET=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-fly deploy
-```
+1. **Create the service**: Railway dashboard → New Project → Deploy from GitHub
+   repo. Railway picks up the `Dockerfile` and `railway.json` automatically.
+   (Note: Railway rejects Dockerfiles containing the `VOLUME` instruction —
+   this one deliberately has none; volumes attach in the dashboard instead.)
+2. **Attach a volume**: service → right-click / Settings → Attach Volume, with
+   **mount path `/data`** (the image's `DB_PATH` already points at
+   `/data/tracker.db`). Without this, history resets on every deploy.
+3. **Set variables** (service → Variables):
+   - `ADMIN_TOKEN` — e.g. `openssl rand -hex 16`
+   - `CRED_SECRET` — encrypts Kalshi private keys at rest:
+     `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+4. **Expose it**: Settings → Networking → Generate Domain. Railway injects
+   `$PORT` and the container binds to it.
 
-Any host that runs a Docker container with a persistent volume works the same
-way (Railway, a VPS, …). `CRED_SECRET` encrypts Kalshi private keys at rest.
+Redeploys are automatic on push to the connected branch. Any other host that
+runs a Docker container with a persistent volume works too:
+`docker run -d -v tracker-data:/data -p 8080:8080 -e ADMIN_TOKEN=… -e CRED_SECRET=… <image>`.
 
 ## Competition-day checklist
 

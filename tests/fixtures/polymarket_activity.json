@@ -1,0 +1,47 @@
+[
+  {
+    "proxyWallet": "0xabc0000000000000000000000000000000000001",
+    "timestamp": 1754500000,
+    "conditionId": "0xcond1",
+    "type": "TRADE",
+    "size": 40,
+    "usdcSize": 24.8,
+    "transactionHash": "0xtx1",
+    "price": 0.62,
+    "asset": "1234567890",
+    "side": "BUY",
+    "outcome": "Yes",
+    "title": "Fed cuts rates in September?",
+    "slug": "fed-cuts-rates-september"
+  },
+  {
+    "proxyWallet": "0xabc0000000000000000000000000000000000001",
+    "timestamp": 1754490000,
+    "conditionId": "0xcond2",
+    "type": "TRADE",
+    "size": 10,
+    "usdcSize": 8.1,
+    "transactionHash": "0xtx2",
+    "price": 0.81,
+    "asset": "987654321",
+    "side": "SELL",
+    "outcome": "No",
+    "title": "Bitcoin above $150k on Dec 31?",
+    "slug": "bitcoin-150k"
+  },
+  {
+    "proxyWallet": "0xabc0000000000000000000000000000000000001",
+    "timestamp": 1754480000,
+    "conditionId": "0xcond2",
+    "type": "REDEEM",
+    "size": 15,
+    "usdcSize": 15.0,
+    "transactionHash": "0xtx3",
+    "price": 1,
+    "asset": "987654321",
+    "side": "",
+    "outcome": "No",
+    "title": "Bitcoin above $150k on Dec 31?",
+    "slug": "bitcoin-150k"
+  }
+]

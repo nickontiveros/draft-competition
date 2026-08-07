@@ -1,0 +1,33 @@
+{
+  "market_positions": [
+    {
+      "ticker": "FED-25SEP-CUT",
+      "position": 25,
+      "market_exposure": 1550,
+      "realized_pnl": 0,
+      "total_traded": 1550,
+      "fees_paid": 18,
+      "resting_orders_count": 0
+    },
+    {
+      "ticker": "CPI-26AUG-A3",
+      "position": -10,
+      "market_exposure": 550,
+      "realized_pnl": 120,
+      "total_traded": 550,
+      "fees_paid": 7,
+      "resting_orders_count": 0
+    },
+    {
+      "ticker": "CLOSED-MKT",
+      "position": 0,
+      "market_exposure": 0,
+      "realized_pnl": 300,
+      "total_traded": 900,
+      "fees_paid": 12,
+      "resting_orders_count": 0
+    }
+  ],
+  "event_positions": [],
+  "cursor": ""
+}

@@ -1,0 +1,29 @@
+{
+  "fills": [
+    {
+      "trade_id": "t-111",
+      "order_id": "o-111",
+      "ticker": "FED-25SEP-CUT",
+      "side": "yes",
+      "action": "buy",
+      "count": 25,
+      "yes_price": 62,
+      "no_price": 38,
+      "is_taker": true,
+      "created_time": "2026-08-06T14:30:00Z"
+    },
+    {
+      "trade_id": "t-222",
+      "order_id": "o-222",
+      "ticker": "CPI-26AUG-A3",
+      "side": "no",
+      "action": "sell",
+      "count": 10,
+      "yes_price": 45,
+      "no_price": 55,
+      "is_taker": false,
+      "created_time": "2026-08-06T15:10:00Z"
+    }
+  ],
+  "cursor": ""
+}

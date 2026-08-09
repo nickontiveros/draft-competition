@@ -19,6 +19,24 @@ def memory_db():
     db_module._SessionLocal = None
 
 
+def test_polymarket_entry_gets_event_url():
+    with db_session() as db:
+        p = Participant(name="poly")
+        db.add(p)
+        db.flush()
+        a = Account(participant_id=p.id, platform="polymarket", identifier="0xabc")
+        db.add(a)
+        db.flush()
+        f = fill(a.id, "0xcond1", "buy", 5.0, 10, NOW - timedelta(hours=1))
+        f.platform = "polymarket"
+        f.raw_json = json.dumps({"eventSlug": "mlb-nyy-bos"})
+        db.add(f)
+        db.flush()
+        stats = compute_player_stats(db, db.get(Participant, p.id))
+    (entry,) = stats.entries
+    assert entry.url == "https://polymarket.com/event/mlb-nyy-bos"
+
+
 def fill(account_id, market_key, side, notional, size, ts, kind="trade", category="", outcome="Yes"):
     return Fill(
         account_id=account_id,

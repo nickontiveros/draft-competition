@@ -3,13 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ p.name }} — Prediction Draft</title>
-{% include "_tokens.html" %}
+<title>{{ p.name }} — Fantasy Football Draft Competition 2026</title>
+{% include "_theme.html" %}
 </head>
 <body>
+{% from "_icons.html" import sport_icon %}
+{% from "_audio.html" import sound_bar %}
+{% include "_icons.html" %}
+{% include "_audio.html" %}
 <div class="wrap">
-  <div class="sub"><a href="/">← Leaderboard</a></div>
-  <h1>{{ p.name }} {% if rank %}<span class="muted">· #{{ rank }}</span>{% endif %}</h1>
+  <div class="topbar">
+    <div>
+      <div class="sub" style="margin-bottom:.4rem"><a href="/">← Leaderboard</a></div>
+      <div class="kicker">Fantasy Football Draft Competition 2026</div>
+      <h1>{{ p.name }} {% if rank %}<span class="muted">· #{{ rank }}</span>{% endif %}</h1>
+    </div>
+    {{ sound_bar() }}
+  </div>
   <div class="sub">
     {% for a in p.accounts %}<span class="badge">{{ a.platform }}</span>{% endfor %}
   </div>
@@ -18,24 +28,24 @@
   <div class="tiles">
     <div class="tile">
       <div class="label">Bankroll</div>
-      <div class="value">${{ "%.2f"|format(s.game_value) }}</div>
+      <div class="value led">${{ "%.2f"|format(s.game_value) }}</div>
       <div class="hint {{ 'pnl-up' if s.pnl >= 0 else 'pnl-down' }}">
         {{ "+" if s.pnl >= 0 }}${{ "%.2f"|format(s.pnl) }} ({{ "+" if s.pnl_pct >= 0 }}{{ "%.1f"|format(s.pnl_pct) }}%)
       </div>
     </div>
     <div class="tile">
       <div class="label">Total wagered</div>
-      <div class="value">${{ "%.2f"|format(stats.total_wagered) }}</div>
+      <div class="value led">${{ "%.2f"|format(stats.total_wagered) }}</div>
       <div class="hint">{{ stats.bets_placed }} bet{{ "s" if stats.bets_placed != 1 }}</div>
     </div>
     <div class="tile">
       <div class="label">Win rate</div>
-      <div class="value">{% if stats.win_rate is not none %}{{ "%.0f"|format(stats.win_rate) }}%{% else %}—{% endif %}</div>
+      <div class="value led">{% if stats.win_rate is not none %}{{ "%.0f"|format(stats.win_rate) }}%{% else %}—{% endif %}</div>
       <div class="hint">{{ stats.wins }}W · {{ stats.losses }}L settled</div>
     </div>
     <div class="tile">
       <div class="label">Best / worst</div>
-      <div class="value">
+      <div class="value led">
         {% if stats.biggest_win %}<span class="pnl-up">+${{ "%.2f"|format(stats.biggest_win.pnl) }}</span>{% else %}—{% endif %}
       </div>
       <div class="hint">
@@ -55,7 +65,7 @@
   <div class="card" style="padding:.7rem .9rem">
     {% for c in stats.categories %}
     <div class="catbar">
-      <span class="cname">{{ c.name }}</span>
+      <span class="cname">{{ sport_icon(sport_slug(c.name)) }}{{ c.name }}</span>
       <div class="track"><div class="fillbar" style="width: {{ (100 * c.wagered / max_cat_wagered) if max_cat_wagered else 0 }}%"></div></div>
       <span class="amt">${{ "%.2f"|format(c.wagered) }}{% if c.wins + c.losses %} · {{ c.wins }}W {{ c.losses }}L{% endif %}</span>
     </div>
@@ -78,18 +88,29 @@
         {% for b in stats.entries %}
         <tr>
           <td>
-            {{ b.title }}
-            <div class="muted">{{ b.platform }}{% if b.category %} · {{ b.category }}{% endif %} · {{ ago(b.last_ts) }}</div>
+            <div style="display:flex; gap:.5rem; align-items:flex-start">
+              {{ sport_icon(sport_slug(b.category)) }}
+              <div>
+                {{ b.title }}
+                <div class="muted">{{ b.platform }}{% if b.category %} · {{ b.category }}{% endif %} · {{ ago(b.last_ts) }}</div>
+                {% if b.url %}
+                <div class="betlinks">
+                  <a class="ride" href="{{ b.url }}" target="_blank" rel="noopener">Ride it</a>
+                  <a class="fade" href="{{ b.url }}" target="_blank" rel="noopener">Fade it</a>
+                </div>
+                {% endif %}
+              </div>
+            </div>
           </td>
           <td>
             {{ b.outcome_label }}
             {% if b.avg_price %}<div class="muted">@ {{ "%.0f"|format(b.avg_price * 100) }}¢ avg</div>{% endif %}
           </td>
-          <td class="num">{% if b.wagered %}${{ "%.2f"|format(b.wagered) }}{% else %}—{% endif %}</td>
+          <td class="num led">{% if b.wagered %}${{ "%.2f"|format(b.wagered) }}{% else %}—{% endif %}</td>
           <td class="num">
             <span class="chip {{ b.status }}">{{ b.status }}</span>
             {% if b.pnl is not none %}
-              <div class="{{ 'pnl-up' if b.pnl >= 0 else 'pnl-down' }}">{{ "+" if b.pnl >= 0 }}${{ "%.2f"|format(b.pnl) }}</div>
+              <div class="led {{ 'pnl-up' if b.pnl >= 0 else 'pnl-down' }}">{{ "+" if b.pnl >= 0 }}${{ "%.2f"|format(b.pnl) }}</div>
             {% endif %}
           </td>
         </tr>

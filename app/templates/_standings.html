@@ -1,0 +1,36 @@
+{% if rows %}
+<table>
+  <thead>
+    <tr>
+      <th></th><th>Player</th><th style="text-align:right">Bankroll</th>
+      <th style="text-align:right">P&amp;L</th><th style="text-align:right">%</th>
+      <th>Trend</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr{% if r.rank == 1 %} class="top-dog"{% endif %}>
+      <td class="num muted">{{ r.rank }}</td>
+      <td>
+        <a class="name" href="/player/{{ r.s.participant_id }}">{{ r.s.name }}</a>
+        <div>
+          {% for a in r.s.accounts %}<span class="badge">{{ a.platform }}</span>{% endfor %}
+        </div>
+        {% for f in r.s.flags %}<div class="flag">⚠️ {{ f }}</div>{% endfor %}
+      </td>
+      <td class="num led">${{ "%.2f"|format(r.s.game_value) }}</td>
+      <td class="num led {{ 'pnl-up' if r.s.pnl >= 0 else 'pnl-down' }}">
+        {{ "+" if r.s.pnl >= 0 }}${{ "%.2f"|format(r.s.pnl) }}
+      </td>
+      <td class="num led {{ 'pnl-up' if r.s.pnl >= 0 else 'pnl-down' }}">
+        {{ "+" if r.s.pnl_pct >= 0 }}{{ "%.1f"|format(r.s.pnl_pct) }}%
+      </td>
+      <td>{{ r.spark | safe }}</td>
+      <td class="muted">{{ r.synced }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">No players yet — <a href="/join">join the game</a> or add accounts on the <a href="/admin">admin page</a>.</div>
+{% endif %}

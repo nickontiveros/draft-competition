@@ -9,6 +9,7 @@ Fills (buys/sells) and settlements are grouped by market into "bets". A bet is:
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.links import bet_url
 from app.models import Account, Fill, MarketMeta, Participant, Snapshot
 
 
@@ -33,6 +35,7 @@ class BetEntry:
     returned: float
     status: str  # "open" | "won" | "lost" | "pre-game"
     last_ts: datetime
+    url: str | None = None  # market page on the source platform
 
     @property
     def pnl(self) -> float | None:
@@ -80,6 +83,15 @@ class PlayerStats:
 
 def _as_utc(ts: datetime) -> datetime:
     return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
+def _meta_raw(meta: MarketMeta | None) -> dict | None:
+    if meta is None or not meta.raw_json:
+        return None
+    try:
+        return json.loads(meta.raw_json)
+    except ValueError:
+        return None
 
 
 def compute_player_stats(db: Session, participant: Participant) -> PlayerStats:
@@ -154,6 +166,12 @@ def compute_player_stats(db: Session, participant: Participant) -> PlayerStats:
                     returned=returned,
                     status=status,
                     last_ts=_as_utc(group[-1].ts),
+                    url=bet_url(
+                        account.platform,
+                        group[0].market_key,  # not `key`: keyless groups fall back to external_id
+                        (buys[0] if buys else group[-1]).raw,
+                        _meta_raw(meta),
+                    ),
                 )
             )
 

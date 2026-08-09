@@ -91,7 +91,10 @@ class Fill(Base):
 
     @property
     def raw(self) -> dict:
-        return json.loads(self.raw_json)
+        try:
+            return json.loads(self.raw_json) if self.raw_json else {}
+        except ValueError:
+            return {}
 
 
 class MarketMeta(Base):

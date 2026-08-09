@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
@@ -7,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.db import db_session
+from app.links import bet_url, sport_slug
 from app.models import Fill, MarketMeta
 from app.scoring import Standing, compute_standings, recent_fills
 from app.stats import fill_metas
@@ -77,13 +79,29 @@ def outcome_label(outcome: str, meta: MarketMeta | None) -> str:
 def feed_item(f: Fill, meta: MarketMeta | None) -> dict:
     label = outcome_label(f.outcome, meta)
     title = (meta.title if meta and meta.title else f.market_title) or f.market_key
+    category = f.category or (meta.category if meta else "")
+    ts = f.ts if f.ts.tzinfo else f.ts.replace(tzinfo=timezone.utc)
+    try:
+        meta_raw = json.loads(meta.raw_json) if meta and meta.raw_json else None
+    except ValueError:
+        meta_raw = None
     base = {
+        "id": f"{f.platform}:{f.external_id}",
         "who": f.account.participant.name,
         "participant_id": f.account.participant_id,
         "platform": f.platform,
-        "category": f.category or (meta.category if meta else ""),
+        "category": category,
+        "icon": sport_slug(category),
         "title": title,
-        "ago": _ago(f.ts if f.ts.tzinfo else f.ts.replace(tzinfo=timezone.utc)),
+        "ago": _ago(ts),
+        "ts": ts.isoformat(),
+        "market_key": f.market_key,
+        "outcome": label,
+        "side": f.side,
+        "kind": f.kind,
+        "price": f.price,
+        "notional": f.notional,
+        "url": bet_url(f.platform, f.market_key, f.raw, meta_raw),
     }
     if f.kind == "settlement":
         if f.notional > 0:
@@ -126,6 +144,30 @@ def _standing_json(s: Standing) -> dict:
     }
 
 
+def _standings_rows(db) -> list[dict]:
+    standings = compute_standings(db)
+    return [
+        {
+            "rank": i + 1,
+            "s": s,
+            "spark": sparkline_svg(s.history),
+            "synced": _ago(
+                min(
+                    (a.last_sync_at for a in s.accounts if a.last_sync_at),
+                    default=None,
+                )
+            ),
+        }
+        for i, s in enumerate(standings)
+    ]
+
+
+def _feed(db, limit: int = 30) -> list[dict]:
+    fills = recent_fills(db, limit=limit)
+    metas = fill_metas(db, fills)
+    return [feed_item(f, metas.get((f.platform, f.market_key))) for f in fills]
+
+
 @router.get("/api/leaderboard")
 def api_leaderboard():
     with db_session() as db:
@@ -136,33 +178,32 @@ def api_leaderboard():
         }
 
 
+@router.get("/api/feed")
+def api_feed():
+    with db_session() as db:
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "feed": _feed(db),
+        }
+
+
+@router.get("/partial/standings", response_class=HTMLResponse)
+def standings_partial(request: Request):
+    with db_session() as db:
+        return templates.TemplateResponse(
+            request, "_standings.html", {"rows": _standings_rows(db)}
+        )
+
+
 @router.get("/", response_class=HTMLResponse)
 def leaderboard_page(request: Request, welcome: str | None = None):
     with db_session() as db:
-        standings = compute_standings(db)
-        fills = recent_fills(db, limit=30)
-        metas = fill_metas(db, fills)
-        rows = [
-            {
-                "rank": i + 1,
-                "s": s,
-                "spark": sparkline_svg(s.history),
-                "synced": _ago(
-                    min(
-                        (a.last_sync_at for a in s.accounts if a.last_sync_at),
-                        default=None,
-                    )
-                ),
-            }
-            for i, s in enumerate(standings)
-        ]
-        feed = [feed_item(f, metas.get((f.platform, f.market_key))) for f in fills]
         return templates.TemplateResponse(
             request,
             "leaderboard.html",
             {
-                "rows": rows,
-                "feed": feed,
+                "rows": _standings_rows(db),
+                "feed": _feed(db),
                 "welcome": welcome,
                 "now": datetime.now(timezone.utc),
             },

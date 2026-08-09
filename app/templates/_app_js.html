@@ -1,0 +1,167 @@
+{# Leaderboard live behavior: polls /api/feed + /partial/standings instead of
+   reloading (a reload would kill the WebAudio context). New-bet detection is
+   a localStorage set of feed ids. NOTE: renderCard() must mirror the Jinja
+   feed-card markup in leaderboard.html — change both together. #}
+<script>
+(function () {
+  if (location.search.includes('welcome')) return;  // welcome flow redirects instead
+
+  var SEEN_KEY = 'ffdc_seen', SEEN_CAP = 300;
+  var MAX_ANIM = 8, MAX_SFX = 3, SFX_SPACING = 450;
+  var seen = null;  // null => first-ever visit
+  try { seen = JSON.parse(localStorage.getItem(SEEN_KEY)); } catch (e) {}
+  var firstVisit = !Array.isArray(seen);
+  var seenSet = new Set(firstVisit ? [] : seen);
+
+  function saveSeen() {
+    try {
+      localStorage.setItem(SEEN_KEY, JSON.stringify(Array.from(seenSet).slice(-SEEN_CAP)));
+    } catch (e) {}
+  }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  /* Mirrors the Jinja feed-card markup in leaderboard.html. */
+  function renderCard(f) {
+    var li = el('li', 'feed-card t-' + f.tone);
+    li.dataset.id = f.id;
+    li.dataset.ts = f.ts;
+
+    var icon = el('span', 'sicon sicon-' + f.icon);
+    icon.setAttribute('aria-hidden', 'true');
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '20'); svg.setAttribute('height', '20');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    var use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#i-' + f.icon);
+    svg.appendChild(use); icon.appendChild(svg); li.appendChild(icon);
+
+    var body = el('div', 'body');
+    var who = el('a', 'name', f.who); who.href = '/player/' + f.participant_id;
+    body.appendChild(who);
+    body.appendChild(document.createTextNode(' '));
+    body.appendChild(el('span', f.tone, f.headline));
+    body.appendChild(document.createTextNode(' — “' + f.title + '”'));
+    var detail = f.detail + ' · ' + f.platform + (f.category ? ' · ' + f.category : '') + ' · ';
+    var muted = el('div', 'muted', detail);
+    muted.appendChild(el('span', 'ago', f.ago));
+    body.appendChild(muted);
+    if (f.url) {
+      var links = el('div', 'betlinks');
+      [['ride', 'Ride it'], ['fade', 'Fade it']].forEach(function (b) {
+        var a = el('a', b[0], b[1]);
+        a.href = f.url; a.target = '_blank'; a.rel = 'noopener';
+        links.appendChild(a);
+      });
+      body.appendChild(links);
+    }
+    li.appendChild(body);
+    return li;
+  }
+
+  var sfxByTone = { up: 'cheer', down: 'trombone', buy: 'airhorn', sell: 'airhorn' };
+  var sfxRank = { up: 0, down: 1, buy: 2, sell: 2 };
+  function celebrate(cards) {
+    cards.slice(0, MAX_ANIM).forEach(function (c, i) {
+      c.el.classList.add('is-new');
+      c.el.style.animationDelay = (i * 90) + 'ms, ' + (i * 90) + 'ms';
+    });
+    if (!window.StadiumAudio) return;
+    cards
+      .slice().sort(function (a, b) { return sfxRank[a.tone] - sfxRank[b.tone]; })
+      .slice(0, MAX_SFX)
+      .forEach(function (c, i) {
+        setTimeout(function () { StadiumAudio.sfx(sfxByTone[c.tone] || 'airhorn'); }, i * SFX_SPACING);
+      });
+  }
+
+  function feedList() { return document.querySelector('ul.feed'); }
+
+  /* Initial page: animate only cards the viewer hasn't seen before. */
+  document.addEventListener('DOMContentLoaded', function () {
+    var cards = Array.from(document.querySelectorAll('li.feed-card[data-id]'));
+    var fresh = [];
+    cards.forEach(function (c) {
+      var id = c.dataset.id;
+      if (!firstVisit && !seenSet.has(id)) {
+        fresh.push({ el: c, tone: (c.className.match(/t-(\w+)/) || [])[1] || 'buy' });
+      }
+      seenSet.add(id);
+    });
+    saveSeen();
+    if (fresh.length) celebrate(fresh);
+    setInterval(poll, 60000);
+    setInterval(updateAgos, 30000);
+  });
+
+  var failures = 0;
+  function poll() {
+    Promise.all([
+      fetch('/api/feed').then(function (r) { return r.json(); }),
+      fetch('/partial/standings').then(function (r) { return r.text(); }),
+    ]).then(function (results) {
+      failures = 0;
+      var note = document.getElementById('reconnect-note');
+      if (note) note.remove();
+      applyFeed(results[0].feed || []);
+      var standings = document.getElementById('standings');
+      if (standings) standings.innerHTML = results[1];
+    }).catch(function () {
+      if (++failures >= 10 && !document.getElementById('reconnect-note')) {
+        var note = el('div', 'muted', 'reconnecting…');
+        note.id = 'reconnect-note';
+        var list = feedList();
+        if (list) list.before(note);
+      }
+    });
+  }
+
+  function applyFeed(items) {
+    if (!items.length) return;
+    var list = feedList();
+    if (!list) {  // page was rendered with an empty feed
+      var card = document.getElementById('feedcard');
+      if (!card) return;
+      card.textContent = '';
+      list = el('ul', 'feed');
+      card.appendChild(list);
+    }
+    var have = new Set(
+      Array.from(list.querySelectorAll('li[data-id]')).map(function (c) { return c.dataset.id; })
+    );
+    var fresh = [];
+    // items are newest-first; iterate reversed so prepends land in order.
+    items.slice().reverse().forEach(function (f) {
+      if (have.has(f.id)) return;
+      var card = renderCard(f);
+      list.prepend(card);
+      if (!seenSet.has(f.id)) fresh.push({ el: card, tone: f.tone });
+      seenSet.add(f.id);
+    });
+    while (list.children.length > 30) list.lastElementChild.remove();
+    if (fresh.length) { fresh.reverse(); celebrate(fresh); saveSeen(); }
+  }
+
+  /* Keep "Xm ago" lines honest between polls (mirror of _ago in leaderboard.py). */
+  function agoText(iso) {
+    var s = (Date.now() - Date.parse(iso)) / 1000;
+    if (!isFinite(s)) return '';
+    if (s < 90) return 'just now';
+    if (s < 5400) return Math.floor(s / 60) + 'm ago';
+    if (s < 172800) return Math.round(s / 3600) + 'h ago';
+    return Math.round(s / 86400) + 'd ago';
+  }
+  function updateAgos() {
+    document.querySelectorAll('li.feed-card[data-ts]').forEach(function (c) {
+      var span = c.querySelector('.ago');
+      var txt = agoText(c.dataset.ts);
+      if (span && txt) span.textContent = txt;
+    });
+  }
+})();
+</script>

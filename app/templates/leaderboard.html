@@ -3,67 +3,52 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prediction Draft — Leaderboard</title>
-{% include "_tokens.html" %}
+<title>Fantasy Football Draft Competition 2026</title>
+{% include "_theme.html" %}
 </head>
 <body>
+{% from "_icons.html" import sport_icon %}
+{% from "_audio.html" import sound_bar %}
+{% include "_icons.html" %}
+{% include "_audio.html" %}
 <div class="wrap">
-  <h1>🏆 Prediction Draft — Leaderboard</h1>
-  <div class="sub">$100 bankroll + P&amp;L since joining · auto-refreshes every 60s · as of {{ now.strftime("%b %-d, %H:%M") }} UTC</div>
+  <div class="topbar">
+    <div>
+      <div class="kicker">Primetime · Prediction Draft</div>
+      <h1>Fantasy Football Draft Competition 2026</h1>
+    </div>
+    {{ sound_bar() }}
+  </div>
+  <div class="sub">$100 bankroll + P&amp;L since joining · live every 60s · as of {{ now.strftime("%b %-d, %H:%M") }} UTC</div>
 
   {% if welcome %}
   <div class="banner">🎉 Welcome, <strong>{{ welcome }}</strong> — you're on the board at $100.00. Go make it grow.</div>
   {% endif %}
 
-  <div class="card">
-    {% if rows %}
-    <table>
-      <thead>
-        <tr>
-          <th></th><th>Player</th><th style="text-align:right">Bankroll</th>
-          <th style="text-align:right">P&amp;L</th><th style="text-align:right">%</th>
-          <th>Trend</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td class="num muted">{{ r.rank }}</td>
-          <td>
-            <a class="name" href="/player/{{ r.s.participant_id }}">{{ r.s.name }}</a>
-            <div>
-              {% for a in r.s.accounts %}<span class="badge">{{ a.platform }}</span>{% endfor %}
-            </div>
-            {% for f in r.s.flags %}<div class="flag">⚠️ {{ f }}</div>{% endfor %}
-          </td>
-          <td class="num">${{ "%.2f"|format(r.s.game_value) }}</td>
-          <td class="num {{ 'pnl-up' if r.s.pnl >= 0 else 'pnl-down' }}">
-            {{ "+" if r.s.pnl >= 0 }}${{ "%.2f"|format(r.s.pnl) }}
-          </td>
-          <td class="num {{ 'pnl-up' if r.s.pnl >= 0 else 'pnl-down' }}">
-            {{ "+" if r.s.pnl_pct >= 0 }}{{ "%.1f"|format(r.s.pnl_pct) }}%
-          </td>
-          <td>{{ r.spark | safe }}</td>
-          <td class="muted">{{ r.synced }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div class="empty">No players yet — <a href="/join">join the game</a> or add accounts on the <a href="/admin">admin page</a>.</div>
-    {% endif %}
+  <div class="card scoreboard" id="standings">
+    {% include "_standings.html" %}
   </div>
 
   <h2>Recent bets</h2>
-  <div class="card">
+  <div class="card" id="feedcard">
     {% if feed %}
     <ul class="feed">
+      {# Mirrored by renderCard() in _app_js.html — change both together. #}
       {% for f in feed %}
-      <li>
-        <a class="name" href="/player/{{ f.participant_id }}">{{ f.who }}</a>
-        <span class="{{ f.tone }}">{{ f.headline }}</span>
-        — “{{ f.title }}”
-        <div class="muted">{{ f.detail }} · {{ f.platform }}{% if f.category %} · {{ f.category }}{% endif %} · {{ f.ago }}</div>
+      <li class="feed-card t-{{ f.tone }}" data-id="{{ f.id }}" data-ts="{{ f.ts }}">
+        {{ sport_icon(f.icon) }}
+        <div class="body">
+          <a class="name" href="/player/{{ f.participant_id }}">{{ f.who }}</a>
+          <span class="{{ f.tone }}">{{ f.headline }}</span>
+          — “{{ f.title }}”
+          <div class="muted">{{ f.detail }} · {{ f.platform }}{% if f.category %} · {{ f.category }}{% endif %} · <span class="ago">{{ f.ago }}</span></div>
+          {% if f.url %}
+          <div class="betlinks">
+            <a class="ride" href="{{ f.url }}" target="_blank" rel="noopener">Ride it</a>
+            <a class="fade" href="{{ f.url }}" target="_blank" rel="noopener">Fade it</a>
+          </div>
+          {% endif %}
+        </div>
       </li>
       {% endfor %}
     </ul>
@@ -74,9 +59,9 @@
 
   <div class="footer">New player? <a href="/join">Join the game →</a></div>
 </div>
+{% include "_app_js.html" %}
 <script>
-  if (!location.search.includes('welcome')) setTimeout(() => location.reload(), 60_000);
-  else setTimeout(() => location.href = '/', 60_000);
+  if (location.search.includes('welcome')) setTimeout(() => location.href = '/', 60_000);
 </script>
 </body>
 </html>

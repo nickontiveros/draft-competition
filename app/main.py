@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="Prediction Draft Tracker", lifespan=lifespan)
+app = FastAPI(title="Fantasy Football Draft Competition 2026", lifespan=lifespan)
 app.include_router(leaderboard.router)
 app.include_router(player.router)
 app.include_router(join.router)

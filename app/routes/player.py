@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.db import db_session
+from app.links import sport_slug
 from app.models import Participant
 from app.routes.leaderboard import _ago, sparkline_svg
 from app.scoring import compute_standings
@@ -44,5 +45,6 @@ def player_page(request: Request, participant_id: int):
                 "chart": chart,
                 "max_cat_wagered": max_cat_wagered,
                 "ago": _ago,
+                "sport_slug": sport_slug,
             },
         )

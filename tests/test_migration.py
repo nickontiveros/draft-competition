@@ -59,6 +59,32 @@ def test_old_db_gains_new_columns(tmp_path):
         db_module._SessionLocal = None
 
 
+def test_pre_migration_fills_regain_market_key_from_raw(tmp_path):
+    """Fills stored before the market_key column existed (backfilled to '')
+    get their key recovered from the raw payload's ticker at startup."""
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(OLD_SCHEMA)
+    conn.execute(
+        "INSERT INTO fills (account_id, platform, external_id, market_title, ts, raw_json)"
+        " VALUES (1, 'kalshi', 't-old', 'KXATPMATCH-26AUG06BERSHE-SHE',"
+        " '2026-08-07 12:00:00', ?)",
+        (json.dumps({"trade_id": "t-old", "ticker": "KXATPMATCH-26AUG06BERSHE-SHE"}),),
+    )
+    conn.commit()
+    conn.close()
+
+    init_db(str(path))
+    try:
+        conn = sqlite3.connect(path)
+        mk = conn.execute("SELECT market_key FROM fills WHERE external_id='t-old'").fetchone()[0]
+        assert mk == "KXATPMATCH-26AUG06BERSHE-SHE"
+        conn.close()
+    finally:
+        db_module._engine = None
+        db_module._SessionLocal = None
+
+
 def test_zeroed_kalshi_fills_repaired_from_raw(tmp_path):
     """Rows saved while the connector read Kalshi's retired cents fields
     (size/price/notional all 0) get re-normalized from raw_json at startup."""

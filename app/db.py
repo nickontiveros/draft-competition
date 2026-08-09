@@ -71,6 +71,30 @@ def _repair_zeroed_kalshi_fills(engine) -> None:
                 )
 
 
+def _repair_missing_kalshi_market_keys(engine) -> None:
+    """Fills stored before the market_key column existed were backfilled with
+    '' and can never match market metadata (so their category/title stay
+    stale); recover the key from the raw payload's ticker."""
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT id, raw_json FROM fills "
+                "WHERE platform = 'kalshi' AND market_key = '' AND raw_json != ''"
+            )
+        ).all()
+        for row_id, raw_json in rows:
+            try:
+                raw = json.loads(raw_json)
+            except ValueError:
+                continue
+            ticker = raw.get("ticker", "")
+            if ticker:
+                conn.execute(
+                    text("UPDATE fills SET market_key = :mk WHERE id = :id"),
+                    {"mk": ticker, "id": row_id},
+                )
+
+
 def init_db(db_path: str | None = None):
     global _engine, _SessionLocal
     path = db_path or settings.db_path
@@ -89,6 +113,7 @@ def init_db(db_path: str | None = None):
     _migrate(_engine)
     Base.metadata.create_all(_engine)
     _repair_zeroed_kalshi_fills(_engine)
+    _repair_missing_kalshi_market_keys(_engine)
     return _engine
 
 

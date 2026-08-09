@@ -150,22 +150,42 @@ async def _enrich_market_meta(
     connector, platform: str, events: list[NormalizedFill]
 ) -> None:
     """Fetch title/category/yes_sub_title for markets we haven't seen, then
-    backfill those fields onto stored fills. Best-effort: failures just leave
-    fills with their raw ticker/title until a later sync."""
+    backfill those fields onto stored fills. Markets whose cached category
+    never resolved past ""/"Other" are retried each sync, so a fixed
+    connector heals old data. Best-effort: failures just leave fills with
+    their raw ticker/title until a later sync."""
     keys = {e.market_key for e in events if e.market_key}
-    if not keys:
-        return
     with db_session() as db:
+        # Older fills outside the sync lookback whose category never resolved.
+        stale_fill_rows = db.execute(
+            select(Fill.market_key, Fill.raw_json).where(
+                Fill.platform == platform,
+                Fill.market_key != "",
+                Fill.category.in_(("", "Other")),
+            )
+        ).all()
+        keys |= {mk for mk, _ in stale_fill_rows}
+        if not keys:
+            return
         known = set(
             db.scalars(
                 select(MarketMeta.market_key).where(
-                    MarketMeta.platform == platform, MarketMeta.market_key.in_(keys)
+                    MarketMeta.platform == platform,
+                    MarketMeta.market_key.in_(keys),
+                    MarketMeta.category.notin_(("", "Other")),
                 )
             )
         )
     unknown = sorted(keys - known)
     if unknown:
-        hints = {e.market_key: e.raw for e in events if e.market_key in unknown}
+        hints: dict[str, dict] = {}
+        for mk, raw_json in stale_fill_rows:
+            if mk in unknown and raw_json:
+                try:
+                    hints[mk] = json.loads(raw_json)
+                except ValueError:
+                    pass
+        hints |= {e.market_key: e.raw for e in events if e.market_key in unknown}
         try:
             metas = await connector.fetch_market_meta(unknown, hints=hints)
         except Exception as exc:  # noqa: BLE001
@@ -173,17 +193,33 @@ async def _enrich_market_meta(
             metas = {}
         if metas:
             with db_session() as db:
-                for key, info in metas.items():
-                    db.add(
-                        MarketMeta(
-                            platform=platform,
-                            market_key=key,
-                            title=info.title,
-                            category=info.category,
-                            yes_sub_title=info.yes_sub_title,
-                            raw_json=json.dumps(info.raw),
+                existing = {
+                    m.market_key: m
+                    for m in db.scalars(
+                        select(MarketMeta).where(
+                            MarketMeta.platform == platform,
+                            MarketMeta.market_key.in_(list(metas)),
                         )
                     )
+                }
+                for key, info in metas.items():
+                    row = existing.get(key)
+                    if row is None:
+                        db.add(
+                            MarketMeta(
+                                platform=platform,
+                                market_key=key,
+                                title=info.title,
+                                category=info.category,
+                                yes_sub_title=info.yes_sub_title,
+                                raw_json=json.dumps(info.raw),
+                            )
+                        )
+                    else:
+                        row.title = info.title or row.title
+                        row.category = info.category
+                        row.yes_sub_title = info.yes_sub_title or row.yes_sub_title
+                        row.raw_json = json.dumps(info.raw)
 
     # Backfill readable titles/categories onto any fills still missing them.
     with db_session() as db:
@@ -197,7 +233,7 @@ async def _enrich_market_meta(
             select(Fill).where(
                 Fill.platform == platform,
                 Fill.market_key.in_(by_key),
-                Fill.category == "",
+                Fill.category.in_(("", "Other")),
             )
         ).all()
         for fill in stale:

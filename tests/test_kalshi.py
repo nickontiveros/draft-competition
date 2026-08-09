@@ -64,6 +64,12 @@ def make_transport(rsa_public_key):
             return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_fills.json").read_text()))
         if route == "/portfolio/settlements":
             return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_settlements.json").read_text()))
+        if route.startswith("/series/"):
+            ticker = route.removeprefix("/series/")
+            series = json.loads((FIXTURES / "kalshi_series.json").read_text())
+            if ticker in series:
+                return httpx.Response(200, json={"series": series[ticker]})
+            return httpx.Response(404, json={"error": {"code": "not_found"}})
         raise AssertionError(f"unexpected route {route}")
 
     return httpx.MockTransport(handler)
@@ -98,15 +104,26 @@ async def test_fetch_settlements(connector):
 
 async def test_market_meta_titles_categories_and_sport_mapping(connector):
     metas = await connector.fetch_market_meta(
-        ["FED-25SEP-CUT", "KXMLB-26AUG07-NYY", "GONE-MKT"]
+        [
+            "FED-25SEP-CUT",
+            "KXMLB-26AUG07-NYY",
+            "KXATPMATCH-26AUG06BERSHE-SHE",
+            "KXLEAGUESCUP-26AUG08-MIA",
+            "GONE-MKT",
+        ]
     )
+    # No series entry: falls back to the market's own (legacy) category.
     fed = metas["FED-25SEP-CUT"]
     assert fed.title == "Fed cuts rates in September?"
     assert fed.category == "Economics"
     assert fed.yes_sub_title == "Rates cut by 25bps or more"
-    # Kalshi says "Sports"; the series prefix refines it to the actual sport.
+    # Series says "Sports"; the ticker prefix refines it to the actual sport.
     assert metas["KXMLB-26AUG07-NYY"].category == "Baseball"
     assert metas["KXMLB-26AUG07-NYY"].yes_sub_title == "Yankees win"
+    # Real series tickers extend the mapped prefixes (KXATPMATCH vs KXATP).
+    assert metas["KXATPMATCH-26AUG06BERSHE-SHE"].category == "Tennis"
+    # Prefix not in the map at all: the series tags name the sport.
+    assert metas["KXLEAGUESCUP-26AUG08-MIA"].category == "Soccer"
     # Unknown market degrades to ticker-as-title.
     assert metas["GONE-MKT"].title == "GONE-MKT"
     assert metas["GONE-MKT"].category == "Other"

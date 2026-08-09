@@ -1,0 +1,20 @@
+{
+  "KXMLB": {
+    "ticker": "KXMLB",
+    "title": "Professional Baseball Game",
+    "category": "Sports",
+    "tags": ["Baseball"]
+  },
+  "KXATPMATCH": {
+    "ticker": "KXATPMATCH",
+    "title": "ATP Tennis Match",
+    "category": "Sports",
+    "tags": ["Tennis"]
+  },
+  "KXLEAGUESCUP": {
+    "ticker": "KXLEAGUESCUP",
+    "title": "Leagues Cup Match",
+    "category": "Sports",
+    "tags": ["Soccer"]
+  }
+}

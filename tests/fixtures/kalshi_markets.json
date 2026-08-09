@@ -20,6 +20,18 @@
       "title": "Yankees beat the Red Sox tonight?",
       "category": "Sports",
       "yes_sub_title": "Yankees win"
+    },
+    {
+      "ticker": "KXATPMATCH-26AUG06BERSHE-SHE",
+      "last_price_dollars": "0.74",
+      "title": "Will Ben Shelton win the Bergs vs Shelton: Round Of 32 match?",
+      "yes_sub_title": "Ben Shelton"
+    },
+    {
+      "ticker": "KXLEAGUESCUP-26AUG08-MIA",
+      "last_price_dollars": "0.17",
+      "title": "Miami vs Monterrey Winner?",
+      "yes_sub_title": "Miami"
     }
   ],
   "cursor": ""

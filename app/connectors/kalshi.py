@@ -47,6 +47,16 @@ SERIES_SPORTS = {
 }
 
 
+def _sport_for_series(series_ticker: str) -> str | None:
+    """Map a series ticker to its sport. Real series tickers extend the
+    prefixes in SERIES_SPORTS (KXATPMATCH, KXMLBGAME, ...), so match on
+    startswith, longest prefix first."""
+    for prefix in sorted(SERIES_SPORTS, key=len, reverse=True):
+        if series_ticker.startswith(prefix):
+            return SERIES_SPORTS[prefix]
+    return None
+
+
 def _fp(value) -> float:
     """Parse a Kalshi fixed-point decimal string ("5.00"); None/"" -> 0.0."""
     try:
@@ -228,17 +238,37 @@ class KalshiConnector:
         data = await self._get("/portfolio/settlements", params)
         return [normalize_settlement(s) for s in data.get("settlements", [])]
 
+    async def _series(self, series_tickers: list[str]) -> dict[str, dict]:
+        """Series objects by ticker; a series that can't be fetched maps to {}."""
+        out: dict[str, dict] = {}
+        for ticker in series_tickers:
+            try:
+                data = await self._get(f"/series/{ticker}")
+                out[ticker] = data.get("series", {}) or {}
+            except Exception:  # noqa: BLE001 - meta is best-effort
+                out[ticker] = {}
+        return out
+
     async def fetch_market_meta(
         self, keys: list[str], hints: dict[str, dict] | None = None
     ) -> dict[str, MarketInfo]:
         markets = await self._markets(keys)
+        # Category moved off the market object; it now lives on the series
+        # (whose ticker is the market ticker's first dash-separated segment).
+        series_by_key = {key: key.split("-")[0].upper() for key in keys}
+        series = await self._series(sorted(set(series_by_key.values())))
         out: dict[str, MarketInfo] = {}
         for key in keys:
             m = markets.get(key, {})
-            category = m.get("category", "") or "Other"
-            series_prefix = key.split("-")[0].upper()
-            if series_prefix in SERIES_SPORTS and category in ("Sports", "Other"):
-                category = SERIES_SPORTS[series_prefix]
+            s = series.get(series_by_key[key], {})
+            category = s.get("category") or m.get("category", "") or "Other"
+            if category in ("Sports", "Other"):
+                sport = _sport_for_series(series_by_key[key])
+                tags = s.get("tags") or []
+                if sport:
+                    category = sport
+                elif tags:
+                    category = tags[0]
             out[key] = MarketInfo(
                 title=m.get("title", key),
                 category=category,

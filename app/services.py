@@ -2,12 +2,32 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from app.credentials import seal
 from app.db import db_session
 from app.models import Account, Participant
+
+_ADDR_RE = re.compile(r"0x[0-9a-fA-F]{40}")
+
+BAD_ADDRESS_MSG = (
+    "that doesn't look like a full Polymarket wallet address — it should be 0x "
+    "followed by 40 characters. Open your Polymarket profile and tap the "
+    "address to copy the complete thing (the shortened '0xAbc…123' display "
+    "text won't work)."
+)
+
+
+def normalize_polymarket_address(identifier: str) -> str:
+    """Extract a full 0x address from whatever was pasted (address, profile
+    URL, text with whitespace). Raises HTTPException(400) if none is found."""
+    match = _ADDR_RE.search(identifier)
+    if not match:
+        raise HTTPException(400, BAD_ADDRESS_MSG)
+    return match.group(0).lower()
 
 
 def create_account(
@@ -28,8 +48,8 @@ def create_account(
         raise HTTPException(400, "identifier is required")
     if platform == "kalshi" and not private_key_pem:
         raise HTTPException(400, "Kalshi accounts need the RSA private key PEM")
-    if platform == "polymarket" and not identifier.lower().startswith("0x"):
-        raise HTTPException(400, "Polymarket identifier should be a wallet address starting 0x")
+    if platform == "polymarket":
+        identifier = normalize_polymarket_address(identifier)
 
     if private_key_pem:
         try:

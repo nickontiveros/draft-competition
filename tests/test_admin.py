@@ -18,7 +18,9 @@ def setup(monkeypatch):
     db_module._SessionLocal = None
 
 
-def add(name="alice", platform="polymarket", identifier="0xabc", pem="", token="tok"):
+def add(
+    name="alice", platform="polymarket", identifier="0x" + "ab" * 20, pem="", token="tok"
+):
     return client.post(
         "/admin/participants",
         data={

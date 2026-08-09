@@ -66,7 +66,7 @@ async def sync_account(account_id: int) -> None:
         logger.warning("sync failed for account %s: %s", account_id, exc)
         with db_session() as db:
             account = db.get(Account, account_id)
-            account.last_sync_error = str(exc)[:500]
+            account.last_sync_error = _friendly_error(platform, exc)
         return
 
     events = fills + settlements
@@ -135,6 +135,21 @@ async def sync_account(account_id: int) -> None:
         )
 
     await _enrich_market_meta(connector, platform, events)
+
+
+def _friendly_error(platform: str, exc: Exception) -> str:
+    msg = str(exc)
+    if platform == "polymarket" and "400" in msg:
+        return (
+            "Polymarket rejected this wallet address (400) — remove this account "
+            "and re-add it with the full 0x… address from the profile page"
+        )
+    if platform == "kalshi" and ("401" in msg or "403" in msg):
+        return (
+            "Kalshi rejected the API key (auth failed) — check the key ID and "
+            "private key, and that the key has read scopes"
+        )
+    return msg[:500]
 
 
 def _latest_snapshot(db, account_id: int) -> Snapshot | None:

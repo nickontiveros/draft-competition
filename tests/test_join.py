@@ -20,7 +20,12 @@ def setup(monkeypatch):
     db_module._SessionLocal = None
 
 
-def join(passphrase="open-sesame", name="dana", platform="polymarket", identifier="0xdd1"):
+def join(
+    passphrase="open-sesame",
+    name="dana",
+    platform="polymarket",
+    identifier="0x" + "dd" * 20,
+):
     return client.post(
         "/join",
         data={

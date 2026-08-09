@@ -2,7 +2,7 @@
   "markets": [
     {
       "ticker": "FED-25SEP-CUT",
-      "last_price": 70,
+      "last_price_dollars": "0.70",
       "title": "Fed cuts rates in September?",
       "category": "Economics",
       "yes_sub_title": "Rates cut by 25bps or more"
@@ -16,7 +16,7 @@
     },
     {
       "ticker": "KXMLB-26AUG07-NYY",
-      "last_price": 55,
+      "last_price_dollars": "0.55",
       "title": "Yankees beat the Red Sox tonight?",
       "category": "Sports",
       "yes_sub_title": "Yankees win"

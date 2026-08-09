@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, text
@@ -40,6 +41,36 @@ def _migrate(engine) -> None:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
+def _repair_zeroed_kalshi_fills(engine) -> None:
+    """Kalshi fills saved while the connector still read the retired cents
+    fields (count/yes_price) have size=0; re-normalize them from the stored
+    raw API payload. Sync never revisits an existing external_id, so without
+    this the zeroed rows would stay wrong forever."""
+    from app.connectors.kalshi import normalize_fill, normalize_settlement
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT id, kind, raw_json FROM fills "
+                "WHERE platform = 'kalshi' AND size = 0 AND raw_json != ''"
+            )
+        ).all()
+        for row_id, kind, raw_json in rows:
+            try:
+                raw = json.loads(raw_json)
+            except ValueError:
+                continue
+            nf = normalize_settlement(raw) if kind == "settlement" else normalize_fill(raw)
+            if nf.size:
+                conn.execute(
+                    text(
+                        "UPDATE fills SET size = :size, price = :price, "
+                        "notional = :notional WHERE id = :id"
+                    ),
+                    {"size": nf.size, "price": nf.price, "notional": nf.notional, "id": row_id},
+                )
+
+
 def init_db(db_path: str | None = None):
     global _engine, _SessionLocal
     path = db_path or settings.db_path
@@ -57,6 +88,7 @@ def init_db(db_path: str | None = None):
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
     _migrate(_engine)
     Base.metadata.create_all(_engine)
+    _repair_zeroed_kalshi_fills(_engine)
     return _engine
 
 

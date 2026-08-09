@@ -15,7 +15,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 @pytest.fixture(scope="module")
 def rsa_key():
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    pem = key.private_key_bytes = key.private_bytes(
+    pem = key.private_bytes(
         serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
@@ -52,7 +52,7 @@ def make_transport(rsa_public_key):
 
         route = request.url.path.removeprefix("/trade-api/v2")
         if route == "/portfolio/balance":
-            return httpx.Response(200, json={"balance": 3899})
+            return httpx.Response(200, json={"balance": 3899, "balance_dollars": "38.99"})
         if route == "/portfolio/positions":
             return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_positions.json").read_text()))
         if route == "/markets":
@@ -113,13 +113,17 @@ async def test_market_meta_titles_categories_and_sport_mapping(connector):
 
 
 async def test_fetch_fills_normalization(connector):
+    # Fixture mixes current fixed-point fields (t-111) with legacy cents
+    # fields (t-222) — both schemas must normalize identically.
     fills = await connector.fetch_fills()
     assert len(fills) == 2
     yes_buy = next(f for f in fills if f.external_id == "t-111")
     assert yes_buy.side == "buy"
     assert yes_buy.outcome == "Yes"
-    assert yes_buy.price == pytest.approx(0.62)
-    assert yes_buy.size == 25
+    assert yes_buy.price == pytest.approx(0.62)  # from yes_price_dollars
+    assert yes_buy.size == 25  # from count_fp
+    assert yes_buy.notional == pytest.approx(15.50)
     no_sell = next(f for f in fills if f.external_id == "t-222")
-    assert no_sell.price == pytest.approx(0.55)  # priced from no_price for NO-side fills
+    assert no_sell.price == pytest.approx(0.55)  # legacy no_price cents for NO-side fills
     assert no_sell.side == "sell"
+    assert no_sell.size == 10

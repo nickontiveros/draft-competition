@@ -3,8 +3,8 @@
     {
       "ticker": "KXMLB-26AUG07-NYY",
       "market_result": "yes",
-      "yes_count": 20,
-      "no_count": 0,
+      "yes_count_fp": "20.00",
+      "no_count_fp": "0.00",
       "revenue": 2000,
       "settled_time": "2026-08-06T23:45:00Z"
     },

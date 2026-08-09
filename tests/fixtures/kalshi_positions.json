@@ -2,11 +2,11 @@
   "market_positions": [
     {
       "ticker": "FED-25SEP-CUT",
-      "position": 25,
-      "market_exposure": 1550,
-      "realized_pnl": 0,
-      "total_traded": 1550,
-      "fees_paid": 18,
+      "position_fp": "25.00",
+      "market_exposure_dollars": "15.50",
+      "realized_pnl_dollars": "0.00",
+      "total_traded_dollars": "15.50",
+      "fees_paid_dollars": "0.18",
       "resting_orders_count": 0
     },
     {
@@ -20,11 +20,11 @@
     },
     {
       "ticker": "CLOSED-MKT",
-      "position": 0,
-      "market_exposure": 0,
-      "realized_pnl": 300,
-      "total_traded": 900,
-      "fees_paid": 12,
+      "position_fp": "0.00",
+      "market_exposure_dollars": "0.00",
+      "realized_pnl_dollars": "3.00",
+      "total_traded_dollars": "9.00",
+      "fees_paid_dollars": "0.12",
       "resting_orders_count": 0
     }
   ],

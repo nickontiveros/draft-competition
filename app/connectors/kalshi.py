@@ -47,6 +47,64 @@ SERIES_SPORTS = {
 }
 
 
+def _fp(value) -> float:
+    """Parse a Kalshi fixed-point decimal string ("5.00"); None/"" -> 0.0."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def normalize_fill(f: dict) -> NormalizedFill:
+    """Normalize a raw /portfolio/fills entry. Handles both the current
+    fixed-point schema (count_fp, yes_price_dollars) and the retired cents
+    schema (count, yes_price)."""
+    side = f.get("side") or f.get("outcome_side") or "yes"  # "yes" | "no"
+    price_dollars = f.get(f"{side}_price_dollars")
+    if price_dollars is not None:
+        price = _fp(price_dollars)
+    else:  # legacy cents fields
+        price = (f.get("yes_price", 0) if side == "yes" else f.get("no_price", 0)) / 100
+    if f.get("count_fp") is not None:
+        size = _fp(f["count_fp"])
+    else:
+        size = float(f.get("count", 0))
+    return NormalizedFill(
+        external_id=f.get("trade_id") or f.get("fill_id", ""),
+        ts=_parse_time(f.get("created_time", "")),
+        market_title=f.get("ticker", ""),
+        outcome=side.capitalize(),
+        side=f.get("action", "").lower(),  # "buy" | "sell"
+        size=size,
+        price=price,
+        market_key=f.get("ticker", ""),
+        raw=f,
+    )
+
+
+def normalize_settlement(s: dict) -> NormalizedFill:
+    """Normalize a raw /portfolio/settlements entry (both schema generations)."""
+    ticker = s.get("ticker", "")
+    if s.get("yes_count_fp") is not None or s.get("no_count_fp") is not None:
+        size = _fp(s.get("yes_count_fp")) + _fp(s.get("no_count_fp"))
+    else:
+        size = float(s.get("yes_count", 0) or 0) + float(s.get("no_count", 0) or 0)
+    revenue = float(s.get("revenue", 0)) / 100  # cents -> dollars paid out
+    return NormalizedFill(
+        external_id=f"settle-{ticker}-{s.get('settled_time', '')}",
+        ts=_parse_time(s.get("settled_time", "")),
+        market_title=ticker,
+        outcome=str(s.get("market_result", "")).capitalize(),
+        side="settle",
+        size=size,
+        price=(revenue / size) if size else 0.0,
+        market_key=ticker,
+        kind="settlement",
+        notional=revenue,
+        raw=s,
+    )
+
+
 def sign_pss(private_key_pem: str, message: str) -> str:
     key = serialization.load_pem_private_key(private_key_pem.encode(), password=None)
     signature = key.sign(
@@ -89,7 +147,10 @@ class KalshiConnector:
 
     async def fetch_state(self) -> AccountState:
         balance = await self._get("/portfolio/balance")
-        cash = balance["balance"] / 100  # cents -> dollars
+        if balance.get("balance_dollars") is not None:
+            cash = _fp(balance["balance_dollars"])
+        else:
+            cash = balance["balance"] / 100  # legacy cents -> dollars
 
         positions: list[dict] = []
         cursor = None
@@ -103,15 +164,22 @@ class KalshiConnector:
             if not cursor:
                 break
 
-        open_positions = {p["ticker"]: p["position"] for p in positions if p.get("position")}
+        open_positions: dict[str, float] = {}
+        for p in positions:
+            if p.get("position_fp") is not None:
+                count = _fp(p["position_fp"])
+            else:
+                count = float(p.get("position") or 0)
+            if count:
+                open_positions[p["ticker"]] = count
         prices = await self._last_prices(list(open_positions))
         positions_value = 0.0
         for ticker, count in open_positions.items():
-            last = prices.get(ticker, 0)  # cents for YES
+            last = prices.get(ticker, 0.0)  # dollars for YES
             if count > 0:  # YES contracts
-                positions_value += count * last / 100
+                positions_value += count * last
             else:  # NO contracts
-                positions_value += -count * (100 - last) / 100
+                positions_value += -count * (1 - last)
         return AccountState(
             cash=cash,
             positions_value=positions_value,
@@ -127,8 +195,15 @@ class KalshiConnector:
                 markets[m["ticker"]] = m
         return markets
 
-    async def _last_prices(self, tickers: list[str]) -> dict[str, int]:
-        return {t: m.get("last_price", 0) for t, m in (await self._markets(tickers)).items()}
+    async def _last_prices(self, tickers: list[str]) -> dict[str, float]:
+        """Last YES price per ticker, in dollars."""
+        out: dict[str, float] = {}
+        for t, m in (await self._markets(tickers)).items():
+            if m.get("last_price_dollars") is not None:
+                out[t] = _fp(m["last_price_dollars"])
+            else:
+                out[t] = m.get("last_price", 0) / 100  # legacy cents
+        return out
 
     async def fetch_fills(self, since: datetime | None = None) -> list[NormalizedFill]:
         params: dict = {"limit": 100}
@@ -140,22 +215,7 @@ class KalshiConnector:
             if cursor:
                 params["cursor"] = cursor
             data = await self._get("/portfolio/fills", params)
-            for f in data.get("fills", []):
-                side = f.get("side", "yes")  # "yes" | "no"
-                price_cents = f.get("yes_price", 0) if side == "yes" else f.get("no_price", 0)
-                fills.append(
-                    NormalizedFill(
-                        external_id=f.get("trade_id") or f.get("fill_id", ""),
-                        ts=_parse_time(f.get("created_time", "")),
-                        market_title=f.get("ticker", ""),
-                        outcome=side.capitalize(),
-                        side=f.get("action", "").lower(),  # "buy" | "sell"
-                        size=float(f.get("count", 0)),
-                        price=price_cents / 100,
-                        market_key=f.get("ticker", ""),
-                        raw=f,
-                    )
-                )
+            fills.extend(normalize_fill(f) for f in data.get("fills", []))
             cursor = data.get("cursor")
             if not cursor:
                 break
@@ -166,28 +226,7 @@ class KalshiConnector:
         if since is not None:
             params["min_ts"] = int(since.timestamp())
         data = await self._get("/portfolio/settlements", params)
-        out = []
-        for s in data.get("settlements", []):
-            ticker = s.get("ticker", "")
-            size = float(s.get("yes_count", 0) or 0) + float(s.get("no_count", 0) or 0)
-            revenue = float(s.get("revenue", 0)) / 100  # cents -> dollars paid out
-            settled = _parse_time(s.get("settled_time", ""))
-            out.append(
-                NormalizedFill(
-                    external_id=f"settle-{ticker}-{s.get('settled_time', '')}",
-                    ts=settled,
-                    market_title=ticker,
-                    outcome=str(s.get("market_result", "")).capitalize(),
-                    side="settle",
-                    size=size,
-                    price=(revenue / size) if size else 0.0,
-                    market_key=ticker,
-                    kind="settlement",
-                    notional=revenue,
-                    raw=s,
-                )
-            )
-        return out
+        return [normalize_settlement(s) for s in data.get("settlements", [])]
 
     async def fetch_market_meta(
         self, keys: list[str], hints: dict[str, dict] | None = None

@@ -12,14 +12,21 @@
   <h1>Tracker admin</h1>
   <div class="sub">Players can self-serve at <a href="/join">/join</a> with the game passphrase.</div>
 
+  {% if not authed %}
   <form method="get" action="/admin">
     <fieldset>
       <legend>Manage players</legend>
-      {% if not authed %}
       <label>Admin token (to view the player list)</label>
       <input name="token" type="password" required>
       <button>Show players</button>
-      {% else %}
+    </fieldset>
+  </form>
+  {% else %}
+  {# No outer <form> here: the per-row delete forms below would be nested
+     inside it, and browsers drop nested form tags — the remove buttons
+     would silently submit the outer GET instead. #}
+  <fieldset>
+    <legend>Manage players</legend>
       {% if participants %}
       <table>
         <thead><tr><th>Player</th><th>Account</th><th>Last sync</th><th></th></tr></thead>
@@ -47,9 +54,8 @@
       {% else %}
       <div class="empty">No players yet.</div>
       {% endif %}
-      {% endif %}
-    </fieldset>
-  </form>
+  </fieldset>
+  {% endif %}
 
   <form method="post" action="/admin/participants">
     <fieldset>

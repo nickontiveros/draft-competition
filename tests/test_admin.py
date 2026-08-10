@@ -60,3 +60,30 @@ def test_invalid_cred_secret_explained(monkeypatch):
 def test_kalshi_requires_pem():
     resp = add(platform="kalshi", identifier="key-1", pem="")
     assert resp.status_code == 400
+
+
+def test_admin_page_delete_forms_not_nested():
+    """Nested <form> tags are dropped by browsers, which silently rewires the
+    per-row remove buttons to the outer GET form (regression test)."""
+    from html.parser import HTMLParser
+
+    add()
+    page = client.get("/admin", params={"token": "tok"}).text
+    assert "/accounts/" in page and "/delete" in page
+
+    class FormNesting(HTMLParser):
+        depth = 0
+        max_depth = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "form":
+                self.depth += 1
+                self.max_depth = max(self.max_depth, self.depth)
+
+        def handle_endtag(self, tag):
+            if tag == "form":
+                self.depth -= 1
+
+    parser = FormNesting()
+    parser.feed(page)
+    assert parser.max_depth == 1

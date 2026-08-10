@@ -175,3 +175,65 @@ async def test_no_deposit_flag_when_explained_by_sells(monkeypatch):
     with db_session() as db:
         account = db.get(Account, alice)
     assert account.deposit_flag == ""
+
+
+def test_open_position_cost_ledger_math():
+    from app.scoring import open_position_cost
+
+    T = datetime(2026, 8, 8, tzinfo=timezone.utc)
+    before, after = T - timedelta(days=1), T + timedelta(days=1)
+    fills = [
+        (before, "mkt-a", "buy", "trade", 4.90),      # open at T -> counts
+        (before, "mkt-b", "buy", "trade", 3.00),
+        (before, "mkt-b", "settle", "settlement", 5.00),  # closed before T -> no
+        (after, "mkt-c", "buy", "trade", 9.99),       # bought after T -> no
+        (before, "mkt-d", "buy", "trade", 2.00),
+        (before, "mkt-d", "sell", "trade", 1.50),     # partially exited -> remainder
+        (before, "", "buy", "trade", 7.77),           # keyless -> ignored
+    ]
+    assert open_position_cost(fills, T) == pytest.approx(4.90 + 0.50)
+
+
+async def test_baseline_stamped_during_broken_valuation_is_healed(monkeypatch):
+    """Regression for the +$7.58-instead-of-+$2.51 bug: the baseline snapshot
+    was taken while the connector valued open positions at $0 (Kalshi's
+    cents-fields removal), so a straddling bet's entire payout counted as
+    P&L. The stamp now patches the position's cost basis from the ledger."""
+    kneek = seed("kneek", platform="kalshi")
+    two_days_ago = datetime.now(timezone.utc) - timedelta(days=2)
+
+    def she_fill(ext_id, size, price):
+        return NormalizedFill(
+            external_id=ext_id, ts=two_days_ago, market_title="Shelton match?",
+            outcome="Yes", side="buy", size=size, price=price,
+            market_key="KXATPMATCH-X",
+        )
+
+    buys = [she_fill("t-she-1", 4, 0.7025), she_fill("t-she-2", 3, 0.696667)]  # $4.90 in
+
+    # First sync happens mid-breakage: the position is open but priced at $0.
+    await sync_with(
+        kneek,
+        StubConnector(
+            AccountState(cash=370.60, positions_value=0.0, open_market_keys={"KXATPMATCH-X"}),
+            fills=buys,
+        ),
+        monkeypatch,
+    )
+    # Later the bet settles and the $6.63 payout lands in cash.
+    settle = NormalizedFill(
+        external_id="settle-she", ts=datetime.now(timezone.utc), market_title="Shelton match?",
+        outcome="Yes", side="settle", size=7, price=6.63 / 7,
+        market_key="KXATPMATCH-X", kind="settlement", notional=6.63,
+    )
+    await sync_with(
+        kneek,
+        StubConnector(AccountState(cash=377.23, positions_value=0.0), fills=buys, settlements=[settle]),
+        monkeypatch,
+    )
+
+    with db_session() as db:
+        standings = compute_standings(db)
+    # True profit is payout minus cost (6.63 - 4.90), not the whole payout.
+    assert standings[0].pnl == pytest.approx(1.73, abs=0.01)
+    assert standings[0].game_value == pytest.approx(101.73, abs=0.01)

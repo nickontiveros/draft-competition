@@ -154,3 +154,56 @@ def test_zeroed_kalshi_fills_repaired_from_raw(tmp_path):
     finally:
         db_module._engine = None
         db_module._SessionLocal = None
+
+
+def test_zero_position_baseline_repaired_from_ledger(tmp_path):
+    """Baselines stamped while the connector priced open positions at $0
+    (production bug: P&L showed +$7.58 instead of +$2.51) get the open
+    position's cost basis patched in at startup."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.db import db_session
+    from app.models import Account, Fill, Participant, Snapshot
+
+    path = tmp_path / "tracker.db"
+    init_db(str(path))
+    baseline_ts = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    with db_session() as db:
+        p = Participant(name="kneek")
+        db.add(p)
+        db.flush()
+        a = Account(participant_id=p.id, platform="kalshi", identifier="k")
+        db.add(a)
+        db.flush()
+        snap = Snapshot(
+            account_id=a.id, ts=baseline_ts, cash=370.60,
+            positions_value=0.0, total_value=370.60,  # recorded mid-breakage
+        )
+        db.add(snap)
+        db.flush()
+        a.baseline_snapshot_id = snap.id
+        db.add_all([
+            Fill(account_id=a.id, platform="kalshi", external_id="t-she-1",
+                 ts=baseline_ts - timedelta(days=1), market_title="SHE", outcome="Yes",
+                 side="buy", size=7, price=0.70, market_key="KXATPMATCH-X",
+                 notional=4.90, kind="trade"),
+            Fill(account_id=a.id, platform="kalshi", external_id="settle-she",
+                 ts=baseline_ts + timedelta(days=1), market_title="SHE", outcome="Yes",
+                 side="settle", size=7, price=0.947, market_key="KXATPMATCH-X",
+                 notional=6.63, kind="settlement"),
+        ])
+    db_module._engine = None
+    db_module._SessionLocal = None
+
+    init_db(str(path))  # startup repair runs here
+    try:
+        conn = sqlite3.connect(path)
+        pv, total = conn.execute(
+            "SELECT positions_value, total_value FROM snapshots"
+        ).fetchone()
+        assert pv == 4.90
+        assert total == 375.50
+        conn.close()
+    finally:
+        db_module._engine = None
+        db_module._SessionLocal = None

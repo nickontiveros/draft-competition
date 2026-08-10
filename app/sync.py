@@ -12,6 +12,7 @@ from app.connectors.base import NormalizedFill
 from app.credentials import unseal
 from app.db import db_session
 from app.models import Account, Fill, MarketMeta, Snapshot
+from app.scoring import heal_snapshot_positions
 
 logger = logging.getLogger(__name__)
 
@@ -82,16 +83,6 @@ async def sync_account(account_id: int) -> None:
         db.add(snapshot)
         db.flush()
 
-        # The $100 game measures P&L from each account's first snapshot.
-        if account.baseline_snapshot_id is None:
-            earliest = db.scalars(
-                select(Snapshot)
-                .where(Snapshot.account_id == account_id)
-                .order_by(Snapshot.ts)
-                .limit(1)
-            ).first()
-            account.baseline_snapshot_id = (earliest or snapshot).id
-
         new_fills = 0
         for f in events:
             exists = db.scalars(
@@ -119,6 +110,27 @@ async def sync_account(account_id: int) -> None:
                 )
             )
             new_fills += 1
+
+        # The $100 game measures P&L from each account's first snapshot.
+        # Stamped after the fill insert above so heal_snapshot_positions can
+        # see the full ledger: a candidate snapshot claiming $0 in positions
+        # while fills show open exposure gets the cost basis patched in,
+        # otherwise every straddling bet's full payout would count as P&L.
+        if account.baseline_snapshot_id is None:
+            earliest = db.scalars(
+                select(Snapshot)
+                .where(Snapshot.account_id == account_id)
+                .order_by(Snapshot.ts)
+                .limit(1)
+            ).first()
+            candidate = earliest or snapshot
+            if heal_snapshot_positions(db, account_id, candidate):
+                logger.warning(
+                    "account %s: baseline snapshot claimed $0 positions but the "
+                    "ledger shows open exposure — patched in cost basis",
+                    account_id,
+                )
+            account.baseline_snapshot_id = candidate.id
 
         if prev is not None:
             _check_deposit(account, prev, state.cash, events)

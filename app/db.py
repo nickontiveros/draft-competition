@@ -95,6 +95,51 @@ def _repair_missing_kalshi_market_keys(engine) -> None:
                 )
 
 
+def _repair_zero_position_baselines(engine) -> None:
+    """Baseline snapshots recorded while the connector couldn't price open
+    positions (e.g. Kalshi's cents-fields removal) claim $0 in positions, so
+    every bet that straddled the baseline counts its full payout as P&L.
+    Patch the cost basis of positions the fill ledger shows open at the
+    baseline timestamp into those snapshots."""
+    from datetime import datetime
+
+    from app.scoring import open_position_cost
+
+    def parse_ts(value):
+        return value if isinstance(value, datetime) else datetime.fromisoformat(value)
+
+    with engine.begin() as conn:
+        baselines = conn.execute(
+            text(
+                "SELECT a.id, s.id, s.ts, s.cash FROM accounts a "
+                "JOIN snapshots s ON s.id = a.baseline_snapshot_id "
+                "WHERE s.positions_value = 0"
+            )
+        ).all()
+        for account_id, snap_id, snap_ts, cash in baselines:
+            fills = conn.execute(
+                text(
+                    "SELECT ts, market_key, side, kind, notional "
+                    "FROM fills WHERE account_id = :a"
+                ),
+                {"a": account_id},
+            ).all()
+            parsed = [
+                (parse_ts(ts), mk, side, kind, notional or 0.0)
+                for ts, mk, side, kind, notional in fills
+                if ts
+            ]
+            cost = open_position_cost(parsed, parse_ts(snap_ts))
+            if cost > 0:
+                conn.execute(
+                    text(
+                        "UPDATE snapshots SET positions_value = :p, total_value = :t "
+                        "WHERE id = :i"
+                    ),
+                    {"p": round(cost, 4), "t": round((cash or 0.0) + cost, 4), "i": snap_id},
+                )
+
+
 def init_db(db_path: str | None = None):
     global _engine, _SessionLocal
     path = db_path or settings.db_path
@@ -114,6 +159,7 @@ def init_db(db_path: str | None = None):
     Base.metadata.create_all(_engine)
     _repair_zeroed_kalshi_fills(_engine)
     _repair_missing_kalshi_market_keys(_engine)
+    _repair_zero_position_baselines(_engine)
     return _engine
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -142,12 +142,60 @@ def participant_history(db: Session, participant: Participant, points: int = 60)
     return history[-points:]
 
 
+def open_position_cost(fills: list[tuple], at_ts: datetime) -> float:
+    """Cost basis of positions still open at `at_ts`, inferred from the fill
+    ledger: per market, dollars in (buys) minus dollars back (sells and
+    settlements) before that moment; whatever exposure remains was an open
+    position. Used to sanity-check baseline snapshots — a snapshot claiming
+    $0 in positions while the ledger shows open exposure was recorded while
+    the connector couldn't price positions (e.g. Kalshi's cents-fields
+    removal), and a baseline stamped from it inflates P&L by the payout of
+    every straddling bet.
+
+    `fills` are (ts, market_key, side, kind, notional) tuples so callers can
+    feed either ORM rows or raw SQL rows.
+    """
+    at_ts = at_ts if at_ts.tzinfo else at_ts.replace(tzinfo=timezone.utc)
+    remaining: dict[str, float] = {}
+    for ts, market_key, side, kind, notional in fills:
+        if not market_key:
+            continue
+        ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+        if ts >= at_ts:
+            continue
+        if kind == "trade" and side == "buy":
+            remaining[market_key] = remaining.get(market_key, 0.0) + (notional or 0.0)
+        elif side in ("sell", "settle"):
+            remaining[market_key] = remaining.get(market_key, 0.0) - (notional or 0.0)
+    return sum(v for v in remaining.values() if v > 0)
+
+
+def heal_snapshot_positions(db: Session, account_id: int, snap: Snapshot) -> bool:
+    """If a snapshot about to become a baseline claims zero position value
+    while the fill ledger shows open exposure at its timestamp, patch in the
+    cost basis. Returns True when the snapshot was changed."""
+    if snap.positions_value:
+        return False
+    rows = db.execute(
+        select(Fill.ts, Fill.market_key, Fill.side, Fill.kind, Fill.notional).where(
+            Fill.account_id == account_id
+        )
+    ).all()
+    cost = open_position_cost(rows, snap.ts)
+    if cost <= 0:
+        return False
+    snap.positions_value = round(cost, 4)
+    snap.total_value = round(snap.cash + cost, 4)
+    return True
+
+
 def lock_baselines(db: Session) -> int:
     """Stamp each account's latest snapshot as its baseline. Returns accounts locked."""
     count = 0
     for account in db.scalars(select(Account)):
         latest = latest_snapshot(db, account.id)
         if latest is not None:
+            heal_snapshot_positions(db, account.id, latest)
             account.baseline_snapshot_id = latest.id
             count += 1
     return count

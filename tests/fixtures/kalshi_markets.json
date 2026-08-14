@@ -32,6 +32,13 @@
       "last_price_dollars": "0.17",
       "title": "Miami vs Monterrey Winner?",
       "yes_sub_title": "Miami"
+    },
+    {
+      "ticker": "KXTHINBOOK-26DEC",
+      "last_price_dollars": "0.00",
+      "yes_bid_dollars": "0.28",
+      "yes_ask_dollars": "0.32",
+      "title": "Thin book market with quotes but no trades?"
     }
   ],
   "cursor": ""

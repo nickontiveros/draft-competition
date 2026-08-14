@@ -88,10 +88,38 @@ def connector(rsa_key):
 async def test_fetch_state(connector):
     state = await connector.fetch_state()
     assert state.cash == pytest.approx(38.99)
-    # 25 YES @ 70c = 17.50, plus 10 NO with yes last_price 40c -> 10 * 0.60 = 6.00
-    assert state.positions_value == pytest.approx(23.50)
-    assert state.total == pytest.approx(62.49)
-    assert state.open_market_keys == {"FED-25SEP-CUT", "CPI-26AUG-A3"}
+    # 25 YES @ 70c = 17.50, plus 10 NO with yes last_price 40c -> 10 * 0.60 = 6.00,
+    # plus thin book (no trades, quotes 28/32c) 30 YES @ 30c mid = 9.00,
+    # plus dark book (no market data at all) carried at $7.00 cost basis —
+    # NOT at $1/contract, which would have booked the 20 NO contracts as $20.
+    assert state.positions_value == pytest.approx(23.50 + 9.00 + 7.00)
+    assert state.total == pytest.approx(38.99 + 39.50)
+    assert state.open_market_keys == {
+        "FED-25SEP-CUT",
+        "CPI-26AUG-A3",
+        "KXTHINBOOK-26DEC",
+        "KXDARKBOOK-26NOV",
+    }
+
+
+def test_usable_yes_price_fallback_chain():
+    from app.connectors.kalshi import usable_yes_price
+
+    # Last trade price wins when present.
+    assert usable_yes_price({"last_price_dollars": "0.62"}) == pytest.approx(0.62)
+    assert usable_yes_price({"last_price": 62}) == pytest.approx(0.62)  # legacy cents
+    # No trades yet: bid/ask mid.
+    assert usable_yes_price(
+        {"last_price_dollars": "0.00", "yes_bid_dollars": "0.28", "yes_ask_dollars": "0.32"}
+    ) == pytest.approx(0.30)
+    assert usable_yes_price({"yes_bid": 28, "yes_ask": 32}) == pytest.approx(0.30)
+    # One-sided books.
+    assert usable_yes_price({"yes_bid_dollars": "0.28"}) == pytest.approx(0.28)
+    assert usable_yes_price({"yes_ask_dollars": "0.90"}) == pytest.approx(0.90)
+    # An ask pinned at $1 (or nothing at all) carries no information.
+    assert usable_yes_price({"yes_ask_dollars": "1.00"}) is None
+    assert usable_yes_price({}) is None
+    assert usable_yes_price({"last_price": 0}) is None
 
 
 async def test_fetch_settlements(connector):

@@ -65,6 +65,33 @@ def _fp(value) -> float:
         return 0.0
 
 
+def _dollars(m: dict, field: str) -> float:
+    """Read a price field in dollars, preferring the fixed-point `<field>_dollars`
+    over the legacy cents `<field>`."""
+    if m.get(f"{field}_dollars") is not None:
+        return _fp(m[f"{field}_dollars"])
+    return (m.get(field) or 0) / 100
+
+
+def usable_yes_price(market: dict) -> float | None:
+    """Best available YES price in dollars, or None when the market gives us
+    nothing usable. Thin markets often have last_price == 0 (never traded);
+    valuing positions there at $0 (or NO positions at a full $1) manufactured
+    phantom losses. Fallback: last trade -> bid/ask mid -> bid -> ask -> None."""
+    last = _dollars(market, "last_price")
+    if last > 0:
+        return last
+    bid = _dollars(market, "yes_bid")
+    ask = _dollars(market, "yes_ask")
+    if bid > 0 and ask > 0:
+        return (bid + ask) / 2
+    if bid > 0:
+        return bid
+    if 0 < ask < 1:
+        return ask
+    return None
+
+
 def normalize_fill(f: dict) -> NormalizedFill:
     """Normalize a raw /portfolio/fills entry. Handles both the current
     fixed-point schema (count_fp, yes_price_dollars) and the retired cents
@@ -201,22 +228,28 @@ class KalshiConnector:
             if not cursor:
                 break
 
-        open_positions: dict[str, float] = {}
+        open_positions: dict[str, tuple[float, float]] = {}  # ticker -> (count, cost)
         for p in positions:
             if p.get("position_fp") is not None:
                 count = _fp(p["position_fp"])
             else:
                 count = float(p.get("position") or 0)
             if count:
-                open_positions[p["ticker"]] = count
-        prices = await self._last_prices(list(open_positions))
+                cost = abs(_dollars(p, "market_exposure"))
+                open_positions[p["ticker"]] = (count, cost)
+
+        markets = await self._markets(list(open_positions))
         positions_value = 0.0
-        for ticker, count in open_positions.items():
-            last = prices.get(ticker, 0.0)  # dollars for YES
-            if count > 0:  # YES contracts
-                positions_value += count * last
+        for ticker, (count, cost) in open_positions.items():
+            price = usable_yes_price(markets.get(ticker, {}))
+            if price is None:
+                # Market gives no price signal at all: carry the position at
+                # its cost basis rather than $0 (YES) or $1 (NO).
+                positions_value += cost
+            elif count > 0:  # YES contracts
+                positions_value += count * price
             else:  # NO contracts
-                positions_value += -count * (1 - last)
+                positions_value += -count * (1 - price)
         return AccountState(
             cash=cash,
             positions_value=positions_value,
@@ -233,14 +266,11 @@ class KalshiConnector:
         return markets
 
     async def _last_prices(self, tickers: list[str]) -> dict[str, float]:
-        """Last YES price per ticker, in dollars."""
-        out: dict[str, float] = {}
-        for t, m in (await self._markets(tickers)).items():
-            if m.get("last_price_dollars") is not None:
-                out[t] = _fp(m["last_price_dollars"])
-            else:
-                out[t] = m.get("last_price", 0) / 100  # legacy cents
-        return out
+        """Best-available YES price per ticker, in dollars (0 when unpriced)."""
+        return {
+            t: usable_yes_price(m) or 0.0
+            for t, m in (await self._markets(tickers)).items()
+        }
 
     async def fetch_fills(self, since: datetime | None = None) -> list[NormalizedFill]:
         params: dict = {"limit": 100}

@@ -42,10 +42,17 @@ class PolymarketConnector:
 
     async def fetch_state(self) -> AccountState:
         positions_value = await self._positions_value()
-        cash = await self._usdc_balance()
+        cash, rpc_used = await self._usdc_balance()
         open_keys = await self._open_market_keys()
         return AccountState(
-            cash=cash, positions_value=positions_value, open_market_keys=open_keys
+            cash=cash,
+            positions_value=positions_value,
+            open_market_keys=open_keys,
+            valuation={
+                "positions_api_value": round(positions_value, 4),
+                "cash_rpc": round(cash, 4),
+                "rpc_endpoint": rpc_used,
+            },
         )
 
     async def _positions_value(self) -> float:
@@ -67,24 +74,49 @@ class PolymarketConnector:
         resp.raise_for_status()
         return {p["conditionId"] for p in resp.json() if p.get("conditionId")}
 
-    async def _usdc_balance(self) -> float:
+    def _rpc_urls(self) -> list[str]:
+        """Configured RPC first, then public fallbacks (deduped, order kept).
+        Public Polygon RPCs rate-limit; one flaky endpoint must not zero out
+        a player's cash."""
+        urls = [
+            settings.polygon_rpc_url,
+            "https://polygon-rpc.com",
+            "https://polygon.llamarpc.com",
+            "https://rpc.ankr.com/polygon",
+        ]
+        return list(dict.fromkeys(u for u in urls if u))
+
+    async def _usdc_balance(self) -> tuple[float, str]:
+        """USDC balance in dollars plus the RPC endpoint that served it.
+        Raises if every endpoint fails — a sync error beats a snapshot that
+        silently books cash as $0."""
         padded = self.wallet.removeprefix("0x").rjust(64, "0")
-        total = 0.0
-        for token in (USDC_E_ADDRESS, USDC_NATIVE_ADDRESS):
-            payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "eth_call",
-                "params": [
-                    {"to": token, "data": _BALANCE_OF_SELECTOR + padded},
-                    "latest",
-                ],
-            }
-            resp = await self._c().post(settings.polygon_rpc_url, json=payload)
-            resp.raise_for_status()
-            result = resp.json().get("result", "0x0")
-            total += int(result, 16) / 1e6  # USDC has 6 decimals
-        return total
+        last_error: Exception | None = None
+        for url in self._rpc_urls():
+            try:
+                total = 0.0
+                for token in (USDC_E_ADDRESS, USDC_NATIVE_ADDRESS):
+                    payload = {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "eth_call",
+                        "params": [
+                            {"to": token, "data": _BALANCE_OF_SELECTOR + padded},
+                            "latest",
+                        ],
+                    }
+                    resp = await self._c().post(url, json=payload)
+                    resp.raise_for_status()
+                    body = resp.json()
+                    if "result" not in body:  # rate-limit/error payload
+                        raise RuntimeError(
+                            f"RPC error from {url}: {body.get('error', body)}"
+                        )
+                    total += int(body["result"], 16) / 1e6  # USDC has 6 decimals
+                return total, url
+            except Exception as exc:  # noqa: BLE001 - try the next endpoint
+                last_error = exc
+        raise RuntimeError(f"all Polygon RPC endpoints failed: {last_error}")
 
     async def _activity(self, since: datetime | None, type_: str | None) -> list[dict]:
         params: dict = {"user": self.wallet, "limit": 100, "sortBy": "TIMESTAMP"}

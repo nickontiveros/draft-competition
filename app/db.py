@@ -27,6 +27,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "pending_orders_json": "VARCHAR NOT NULL DEFAULT '[]'",
         "last_sync_note": "VARCHAR NOT NULL DEFAULT ''",
         "baseline_adjustment": "FLOAT NOT NULL DEFAULT 0",
+        "valuation_json": "VARCHAR NOT NULL DEFAULT '{}'",
     },
     "snapshots": {
         "reserved": "FLOAT NOT NULL DEFAULT 0",

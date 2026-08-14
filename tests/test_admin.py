@@ -177,3 +177,22 @@ def test_clear_flag():
     assert resp.status_code == 303
     with db_session() as db:
         assert db.get(Account, aid).deposit_flag == ""
+
+
+def test_history_endpoint(monkeypatch):
+    monkeypatch.setattr(settings, "mock_connectors", True)
+    add()
+    aid = _account_id()
+    client.post(f"/admin/accounts/{aid}/rebaseline", data={"token": "tok"}, follow_redirects=False)
+
+    assert client.get(f"/admin/accounts/{aid}/history").status_code == 403
+    resp = client.get(f"/admin/accounts/{aid}/history", params={"token": "tok"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["participant"] == "alice"
+    assert data["baseline"] is not None
+    assert data["snapshots"][0]["total_value"] > 0
+    assert any(s["is_baseline"] for s in data["snapshots"])
+    assert "cash" in data["last_sync_note"] and "positions" in data["last_sync_note"]
+    assert "new rows" in data["last_sync_note"]
+    assert client.get("/admin/accounts/999/history", params={"token": "tok"}).status_code == 404

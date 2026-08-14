@@ -153,8 +153,11 @@ async def sync_account(account_id: int) -> None:
         )
         account.last_sync_at = datetime.now(timezone.utc)
         account.last_sync_error = ""
+        account.valuation_json = json.dumps(state.valuation)
         note = (
-            f"{len(fills)} fills ({new_fills} new) · {len(settlements)} settlements "
+            f"cash ${state.cash:.2f} · positions ${state.positions_value:.2f} "
+            f"· reserved ${state.reserved:.2f} · total ${state.total:.2f} · "
+            f"{len(fills)} fills · {len(settlements)} settlements ({new_fills} new rows) "
             f"· {len(orders)} resting orders"
         )
         account.last_sync_note = note

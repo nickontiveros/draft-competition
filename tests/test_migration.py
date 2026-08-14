@@ -49,6 +49,7 @@ def test_old_db_gains_new_columns(tmp_path):
             "pending_orders_json",
             "last_sync_note",
             "baseline_adjustment",
+            "valuation_json",
         } <= account_cols
         adj = conn.execute("SELECT baseline_adjustment FROM accounts LIMIT 1").fetchone()
         assert adj is None or adj[0] == 0.0  # default applies to existing rows

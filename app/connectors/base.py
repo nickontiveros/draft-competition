@@ -14,6 +14,9 @@ class AccountState:
     # Cash committed to resting (unfilled) buy orders. Kalshi excludes this
     # from the balance endpoint; without it, a resting order looks like a loss.
     reserved: float = 0.0
+    # Diagnostic trace of how positions_value was computed (per market:
+    # count, cost, price source, value). Stored on the account each sync.
+    valuation: dict = field(default_factory=dict)
 
     @property
     def total(self) -> float:

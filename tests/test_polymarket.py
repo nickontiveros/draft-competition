@@ -114,3 +114,43 @@ def test_pick_category_prefers_specific_sport():
     assert _pick_category(event) == "Tennis"
     assert _pick_category({"tags": [{"label": "Sports"}]}) == "Sports"
     assert _pick_category({"tags": []}) == "Other"
+
+
+def _rpc_ok_handler(value=38_250_000):
+    def handle(request):
+        body = json.loads(request.content)
+        token = body["params"][0]["to"]
+        v = value if token.startswith("0x2791") else 0
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": hex(v)})
+
+    return handle
+
+
+async def test_rpc_error_payload_falls_back_to_next_endpoint(monkeypatch):
+    """A rate-limited RPC (error payload, no result) must not read as $0 cash."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            calls.append(request.url.host)
+            if request.url.host == "polygon-rpc.com":  # primary: rate-limited
+                return httpx.Response(
+                    200, json={"jsonrpc": "2.0", "id": 1, "error": {"code": -32005, "message": "limit"}}
+                )
+            return _rpc_ok_handler()(request)
+        raise AssertionError(f"unexpected {request.url}")
+
+    c = PolymarketConnector(WALLET, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    cash, rpc_used = await c._usdc_balance()
+    assert cash == pytest.approx(38.25)
+    assert rpc_used != "https://polygon-rpc.com"
+    assert "polygon-rpc.com" in calls  # primary was tried first
+
+
+async def test_all_rpcs_failing_raises_instead_of_zero():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, text="rate limited")
+
+    c = PolymarketConnector(WALLET, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with pytest.raises(RuntimeError, match="all Polygon RPC endpoints failed"):
+        await c._usdc_balance()

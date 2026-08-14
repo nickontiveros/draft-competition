@@ -73,23 +73,29 @@ def _dollars(m: dict, field: str) -> float:
     return (m.get(field) or 0) / 100
 
 
-def usable_yes_price(market: dict) -> float | None:
-    """Best available YES price in dollars, or None when the market gives us
-    nothing usable. Thin markets often have last_price == 0 (never traded);
-    valuing positions there at $0 (or NO positions at a full $1) manufactured
-    phantom losses. Fallback: last trade -> bid/ask mid -> bid -> ask -> None."""
+def yes_price_with_source(market: dict) -> tuple[float, str] | None:
+    """Best available YES price in dollars plus which signal produced it
+    ("last"/"mid"/"bid"/"ask"), or None when the market gives us nothing
+    usable. Thin markets often have last_price == 0 (never traded); valuing
+    positions there at $0 (or NO positions at a full $1) manufactured phantom
+    losses. Fallback: last trade -> bid/ask mid -> bid -> ask -> None."""
     last = _dollars(market, "last_price")
     if last > 0:
-        return last
+        return last, "last"
     bid = _dollars(market, "yes_bid")
     ask = _dollars(market, "yes_ask")
     if bid > 0 and ask > 0:
-        return (bid + ask) / 2
+        return (bid + ask) / 2, "mid"
     if bid > 0:
-        return bid
+        return bid, "bid"
     if 0 < ask < 1:
-        return ask
+        return ask, "ask"
     return None
+
+
+def usable_yes_price(market: dict) -> float | None:
+    priced = yes_price_with_source(market)
+    return priced[0] if priced else None
 
 
 def normalize_fill(f: dict) -> NormalizedFill:
@@ -240,20 +246,33 @@ class KalshiConnector:
 
         markets = await self._markets(list(open_positions))
         positions_value = 0.0
+        valuation: dict[str, dict] = {}
         for ticker, (count, cost) in open_positions.items():
-            price = usable_yes_price(markets.get(ticker, {}))
-            if price is None:
+            priced = yes_price_with_source(markets.get(ticker, {}))
+            if priced is None:
                 # Market gives no price signal at all: carry the position at
                 # its cost basis rather than $0 (YES) or $1 (NO).
-                positions_value += cost
-            elif count > 0:  # YES contracts
-                positions_value += count * price
-            else:  # NO contracts
-                positions_value += -count * (1 - price)
+                value, price, source = cost, None, "cost"
+            else:
+                price, source = priced
+                if count > 0:  # YES contracts
+                    value = count * price
+                else:  # NO contracts
+                    value = -count * (1 - price)
+            positions_value += value
+            valuation[ticker] = {
+                "count": count,
+                "cost": round(cost, 4),
+                "price": price,
+                "source": source,
+                "value": round(value, 4),
+                "in_markets_response": ticker in markets,
+            }
         return AccountState(
             cash=cash,
             positions_value=positions_value,
             open_market_keys=set(open_positions),
+            valuation=valuation,
         )
 
     async def _markets(self, tickers: list[str]) -> dict[str, dict]:

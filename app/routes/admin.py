@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+
 from fastapi import APIRouter, Form, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -41,7 +44,12 @@ def admin_page(request: Request, token: str | None = None):
     return templates.TemplateResponse(
         request,
         "admin.html",
-        {"participants": participants, "authed": authed, "token": token or ""},
+        {
+            "participants": participants,
+            "authed": authed,
+            "token": token or "",
+            "version": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "unknown")[:7],
+        },
     )
 
 
@@ -69,6 +77,69 @@ async def remove_account(
     if not delete_account(account_id):
         raise HTTPException(404, "no such account")
     return RedirectResponse(f"/admin?token={token or x_admin_token}", status_code=303)
+
+
+@router.get("/accounts/{account_id}/history")
+def account_history(account_id: int, token: str | None = None):
+    """Diagnostic dump: baseline, latest valuation trace, recent snapshots.
+    Contains no credentials — dollar values, timestamps, and market tickers."""
+    _check_token(token)
+    from app.models import Snapshot
+
+    with db_session() as db:
+        account = db.get(Account, account_id)
+        if account is None:
+            raise HTTPException(404, "no such account")
+        baseline = (
+            db.get(Snapshot, account.baseline_snapshot_id)
+            if account.baseline_snapshot_id
+            else None
+        )
+        snapshots = db.scalars(
+            select(Snapshot)
+            .where(Snapshot.account_id == account_id)
+            .order_by(Snapshot.ts.desc())
+            .limit(50)
+        ).all()
+        try:
+            valuation = json.loads(account.valuation_json or "{}")
+        except ValueError:
+            valuation = {}
+        return {
+            "account_id": account.id,
+            "participant": account.participant.name,
+            "platform": account.platform,
+            "baseline": (
+                {
+                    "snapshot_id": baseline.id,
+                    "ts": baseline.ts.isoformat(),
+                    "cash": baseline.cash,
+                    "positions_value": baseline.positions_value,
+                    "reserved": baseline.reserved,
+                    "total_value": baseline.total_value,
+                }
+                if baseline
+                else None
+            ),
+            "baseline_adjustment": account.baseline_adjustment,
+            "deposit_flag": account.deposit_flag,
+            "last_sync_error": account.last_sync_error,
+            "last_sync_note": account.last_sync_note,
+            "latest_valuation": valuation,
+            "pending_orders": account.pending_orders,
+            "open_markets": sorted(account.open_markets),
+            "snapshots": [
+                {
+                    "ts": s.ts.isoformat(),
+                    "cash": s.cash,
+                    "positions_value": s.positions_value,
+                    "reserved": s.reserved,
+                    "total_value": s.total_value,
+                    "is_baseline": s.id == account.baseline_snapshot_id,
+                }
+                for s in snapshots
+            ],
+        }
 
 
 @router.post("/accounts/{account_id}/rebaseline")

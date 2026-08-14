@@ -109,6 +109,11 @@
       <button>Snapshot &amp; lock baselines</button>
     </fieldset>
   </form>
+
+  <div class="footer">
+    Running version: {{ version }}{% if authed %} · per-account diagnostics:
+    <code>/admin/accounts/&lt;id&gt;/history?token=…</code>{% endif %}
+  </div>
 </div>
 </body>
 </html>

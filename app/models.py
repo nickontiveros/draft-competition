@@ -53,6 +53,8 @@ class Account(Base):
     pending_orders_json: Mapped[str] = mapped_column(String, default="[]")
     # Human-readable summary of what the last successful sync captured.
     last_sync_note: Mapped[str] = mapped_column(String, default="")
+    # Diagnostic trace of the last sync's position valuation, per market.
+    valuation_json: Mapped[str] = mapped_column(String, default="{}")
 
     @property
     def open_markets(self) -> set[str]:

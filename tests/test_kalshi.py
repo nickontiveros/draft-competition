@@ -196,3 +196,16 @@ async def test_fetch_open_orders(connector):
 
     sell = orders[2]  # sells reserve contracts, not cash
     assert sell.reserved == 0.0
+
+
+async def test_fetch_state_valuation_trace(connector):
+    state = await connector.fetch_state()
+    v = state.valuation
+    assert v["FED-25SEP-CUT"]["source"] == "last"
+    assert v["FED-25SEP-CUT"]["value"] == pytest.approx(17.50)
+    assert v["KXTHINBOOK-26DEC"]["source"] == "mid"
+    assert v["KXTHINBOOK-26DEC"]["value"] == pytest.approx(9.00)
+    dark = v["KXDARKBOOK-26NOV"]
+    assert dark["source"] == "cost"
+    assert dark["value"] == pytest.approx(7.00)
+    assert dark["in_markets_response"] is False

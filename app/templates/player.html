@@ -28,9 +28,9 @@
   <div class="tiles">
     <div class="tile">
       <div class="label">Bankroll</div>
-      <div class="value led">${{ "%.2f"|format(s.game_value) }}</div>
-      <div class="hint {{ 'pnl-up' if s.pnl >= 0 else 'pnl-down' }}">
-        {{ "+" if s.pnl >= 0 }}${{ "%.2f"|format(s.pnl) }} ({{ "+" if s.pnl_pct >= 0 }}{{ "%.1f"|format(s.pnl_pct) }}%)
+      <div class="value led">${{ "%.2f"|format(s.game_value) }} {% if s.busted %}<span class="chip busted">busted</span>{% endif %}</div>
+      <div class="hint {{ 'pnl-up' if s.pnl_capped >= 0 else 'pnl-down' }}">
+        {{ "+" if s.pnl_capped >= 0 }}${{ "%.2f"|format(s.pnl_capped) }} ({{ "+" if s.pnl_pct >= 0 }}{{ "%.1f"|format(s.pnl_pct) }}%)
       </div>
     </div>
     <div class="tile">
@@ -132,6 +132,7 @@
     {% endfor %}
     — the game tracks P&amp;L against the $100 bankroll, not these balances.
     Pre-game bets are shown but excluded from stats.
+    {% if s.busted %}True P&amp;L is {{ "%.2f"|format(s.pnl) }} — game loss is capped at the $100 stake.{% endif %}
   </div>
   {% endif %}
 </div>

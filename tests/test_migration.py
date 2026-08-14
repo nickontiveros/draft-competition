@@ -44,7 +44,14 @@ def test_old_db_gains_new_columns(tmp_path):
         fill_cols = {r[1] for r in conn.execute("PRAGMA table_info(fills)")}
         assert {"market_key", "notional", "kind", "category"} <= fill_cols
         account_cols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)")}
-        assert {"open_markets_json", "pending_orders_json", "last_sync_note"} <= account_cols
+        assert {
+            "open_markets_json",
+            "pending_orders_json",
+            "last_sync_note",
+            "baseline_adjustment",
+        } <= account_cols
+        adj = conn.execute("SELECT baseline_adjustment FROM accounts LIMIT 1").fetchone()
+        assert adj is None or adj[0] == 0.0  # default applies to existing rows
         snapshot_cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
         assert "reserved" in snapshot_cols
         # Existing rows survive with sane defaults.

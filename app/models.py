@@ -41,6 +41,9 @@ class Account(Base):
     baseline_snapshot_id: Mapped[int | None] = mapped_column(
         ForeignKey("snapshots.id"), nullable=True
     )
+    # Signed dollars added to the effective baseline: recording a mid-game
+    # deposit (+) or withdrawal (-) here keeps it out of the player's P&L.
+    baseline_adjustment: Mapped[float] = mapped_column(default=0.0)
     last_sync_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_sync_error: Mapped[str] = mapped_column(String, default="")
     deposit_flag: Mapped[str] = mapped_column(String, default="")

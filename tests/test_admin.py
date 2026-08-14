@@ -87,3 +87,93 @@ def test_admin_page_delete_forms_not_nested():
     parser = FormNesting()
     parser.feed(page)
     assert parser.max_depth == 1
+
+
+def _account_id():
+    from app.db import db_session
+    from app.models import Account
+
+    with db_session() as db:
+        return db.query(Account).first().id
+
+
+def test_rebaseline_resets_player(monkeypatch):
+    monkeypatch.setattr(settings, "mock_connectors", True)
+    add()
+    aid = _account_id()
+    # Simulate an inflated account: baseline never matching current value.
+    resp = client.post(
+        f"/admin/accounts/{aid}/rebaseline", data={"token": "tok"}, follow_redirects=False
+    )
+    assert resp.status_code == 303
+
+    from app.db import db_session
+    from app.models import Account
+    from app.scoring import compute_standings
+
+    with db_session() as db:
+        account = db.get(Account, aid)
+        standings = compute_standings(db)
+    assert account.deposit_flag == ""
+    assert account.baseline_adjustment == 0.0
+    assert standings[0].game_value == pytest.approx(100.0)
+
+
+def test_adjust_records_deposit_and_clears_flag():
+    add()
+    aid = _account_id()
+    from app.db import db_session
+    from app.models import Account
+
+    with db_session() as db:
+        db.get(Account, aid).deposit_flag = "cash +$40.00 not explained"
+
+    resp = client.post(
+        f"/admin/accounts/{aid}/adjust",
+        data={"token": "tok", "amount": "40"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    # Withdrawals subtract.
+    client.post(
+        f"/admin/accounts/{aid}/adjust",
+        data={"token": "tok", "amount": "-15.50"},
+        follow_redirects=False,
+    )
+    with db_session() as db:
+        account = db.get(Account, aid)
+    assert account.baseline_adjustment == pytest.approx(24.50)
+    assert account.deposit_flag == ""
+
+
+def test_adjust_rejects_zero_and_bad_token():
+    add()
+    aid = _account_id()
+    assert (
+        client.post(
+            f"/admin/accounts/{aid}/adjust", data={"token": "tok", "amount": "0"}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            f"/admin/accounts/{aid}/adjust", data={"token": "nope", "amount": "5"}
+        ).status_code
+        == 403
+    )
+
+
+def test_clear_flag():
+    add()
+    aid = _account_id()
+    from app.db import db_session
+    from app.models import Account
+
+    with db_session() as db:
+        db.get(Account, aid).deposit_flag = "cash +$9.00 not explained"
+    resp = client.post(
+        f"/admin/accounts/{aid}/clear-flag", data={"token": "tok"}, follow_redirects=False
+    )
+    assert resp.status_code == 303
+    with db_session() as db:
+        assert db.get(Account, aid).deposit_flag == ""

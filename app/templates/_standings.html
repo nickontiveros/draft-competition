@@ -18,11 +18,14 @@
         </div>
         {% for f in r.s.flags %}<div class="flag">⚠️ {{ f }}</div>{% endfor %}
       </td>
-      <td class="num led">${{ "%.2f"|format(r.s.game_value) }}</td>
-      <td class="num led {{ 'pnl-up' if r.s.pnl >= 0 else 'pnl-down' }}">
-        {{ "+" if r.s.pnl >= 0 }}${{ "%.2f"|format(r.s.pnl) }}
+      <td class="num led">
+        ${{ "%.2f"|format(r.s.game_value) }}
+        {% if r.s.busted %}<div><span class="chip busted">busted</span></div>{% endif %}
       </td>
-      <td class="num led {{ 'pnl-up' if r.s.pnl >= 0 else 'pnl-down' }}">
+      <td class="num led {{ 'pnl-up' if r.s.pnl_capped >= 0 else 'pnl-down' }}">
+        {{ "+" if r.s.pnl_capped >= 0 }}${{ "%.2f"|format(r.s.pnl_capped) }}
+      </td>
+      <td class="num led {{ 'pnl-up' if r.s.pnl_capped >= 0 else 'pnl-down' }}">
         {{ "+" if r.s.pnl_pct >= 0 }}{{ "%.1f"|format(r.s.pnl_pct) }}%
       </td>
       <td>{{ r.spark | safe }}</td>

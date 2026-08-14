@@ -38,18 +38,30 @@ class Standing:
 
     @property
     def pnl(self) -> float:
+        """True P&L vs the effective baseline (uncapped)."""
         return self.current_total - self.baseline_total
 
     @property
+    def busted(self) -> bool:
+        """Lost the entire $100 stake — the game loss floor."""
+        return self.pnl <= -settings.starting_bankroll
+
+    @property
+    def pnl_capped(self) -> float:
+        """P&L for display/ranking: only the $100 stake was ever in play, so
+        losses cap at -$100 even if the real account fell further."""
+        return max(self.pnl, -settings.starting_bankroll)
+
+    @property
     def game_value(self) -> float:
-        """The $100-game bankroll: starting stake plus P&L since baseline.
-        Independent of how much real money sits in the underlying accounts."""
-        return settings.starting_bankroll + self.pnl
+        """The $100-game bankroll: starting stake plus P&L since baseline,
+        floored at $0. Independent of real account balances."""
+        return max(0.0, settings.starting_bankroll + self.pnl)
 
     @property
     def pnl_pct(self) -> float:
         base = settings.starting_bankroll
-        return 100 * self.pnl / base if base else 0.0
+        return 100 * self.pnl_capped / base if base else 0.0
 
     @property
     def flags(self) -> list[str]:
@@ -91,7 +103,13 @@ def compute_standings(db: Session) -> list[Standing]:
                     platform=account.platform,
                     identifier=account.identifier,
                     current_total=latest.total_value if latest else None,
-                    baseline_total=baseline.total_value if baseline else None,
+                    # Effective baseline: snapshot value plus recorded
+                    # deposits/withdrawals, so those never count as P&L.
+                    baseline_total=(
+                        baseline.total_value + account.baseline_adjustment
+                        if baseline
+                        else None
+                    ),
                     last_sync_at=account.last_sync_at,
                     last_sync_error=account.last_sync_error,
                     deposit_flag=account.deposit_flag,
@@ -114,7 +132,11 @@ def participant_history(db: Session, participant: Participant, points: int = 60)
     if not account_ids:
         return []
     baselines = {
-        a.id: (db.get(Snapshot, a.baseline_snapshot_id).total_value if a.baseline_snapshot_id else None)
+        a.id: (
+            db.get(Snapshot, a.baseline_snapshot_id).total_value + a.baseline_adjustment
+            if a.baseline_snapshot_id
+            else None
+        )
         for a in participant.accounts
     }
     rows = db.scalars(
@@ -189,16 +211,24 @@ def heal_snapshot_positions(db: Session, account_id: int, snap: Snapshot) -> boo
     return True
 
 
+def rebaseline_account(db: Session, account: Account) -> bool:
+    """Stamp the account's latest (healed) snapshot as its baseline and wipe
+    any adjustment/flag — the player restarts at exactly $100 from now.
+    Returns False when the account has no snapshot yet."""
+    latest = latest_snapshot(db, account.id)
+    if latest is None:
+        return False
+    heal_snapshot_positions(db, account.id, latest)
+    account.baseline_snapshot_id = latest.id
+    account.baseline_adjustment = 0.0
+    account.deposit_flag = ""
+    return True
+
+
 def lock_baselines(db: Session) -> int:
-    """Stamp each account's latest snapshot as its baseline. Returns accounts locked."""
-    count = 0
-    for account in db.scalars(select(Account)):
-        latest = latest_snapshot(db, account.id)
-        if latest is not None:
-            heal_snapshot_positions(db, account.id, latest)
-            account.baseline_snapshot_id = latest.id
-            count += 1
-    return count
+    """Rebaseline every account (restart the whole game at $100). Returns
+    accounts locked."""
+    return sum(1 for account in db.scalars(select(Account)) if rebaseline_account(db, account))
 
 
 def recent_fills(db: Session, limit: int = 30) -> list[Fill]:

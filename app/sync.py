@@ -54,6 +54,9 @@ async def sync_account(account_id: int) -> None:
     """
     with db_session() as db:
         account = db.get(Account, account_id)
+        if account is None:  # deleted mid-run or bad id — nothing to sync
+            logger.warning("sync skipped: account %s does not exist", account_id)
+            return
         platform = account.platform
         connector = build_connector(account)
         prev = _latest_snapshot(db, account_id)
@@ -315,7 +318,8 @@ def _check_deposit(
     if cash_increase > explained + prev.positions_value + reserved_slack + DEPOSIT_FLAG_THRESHOLD:
         account.deposit_flag = (
             f"cash +${cash_increase:.2f} at {datetime.now(timezone.utc):%m-%d %H:%M} UTC "
-            "not explained by sells/settlements"
+            "not explained by sells/settlements — record the deposit or "
+            "rebaseline on /admin"
         )
 
 

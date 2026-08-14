@@ -38,10 +38,31 @@
               <span class="badge">{{ a.platform }}</span>
               <span class="muted">{{ a.identifier[:14] }}{% if a.identifier|length > 14 %}…{% endif %}</span>
               {% if a.last_sync_error %}<div class="flag">⚠️ {{ a.last_sync_error[:120] }}</div>{% endif %}
+              {% if a.deposit_flag %}<div class="flag">💰 {{ a.deposit_flag[:120] }}</div>{% endif %}
               {% if a.last_sync_note %}<div class="muted">{{ a.last_sync_note }}</div>{% endif %}
+              {% if a.baseline_adjustment %}
+              <div class="muted">baseline adjusted {{ "+" if a.baseline_adjustment > 0 }}${{ "%.2f"|format(a.baseline_adjustment) }}</div>
+              {% endif %}
             </td>
             <td class="muted">{{ a.last_sync_at.strftime("%m-%d %H:%M") if a.last_sync_at else "never" }}</td>
             <td>
+              <form method="post" action="/admin/accounts/{{ a.id }}/rebaseline" style="margin-bottom:.35rem"
+                    onsubmit="return confirm('Rebaseline {{ p.name }} ({{ a.platform }})? Resets their P&L to $0 from now.')">
+                <input type="hidden" name="token" value="{{ token }}">
+                <button class="mini">rebaseline</button>
+              </form>
+              <form method="post" action="/admin/accounts/{{ a.id }}/adjust" style="margin-bottom:.35rem">
+                <input type="hidden" name="token" value="{{ token }}">
+                <input name="amount" type="number" step="0.01" required placeholder="+deposit / -withdrawal"
+                       style="width:9.5rem; display:inline-block">
+                <button class="mini">record</button>
+              </form>
+              {% if a.deposit_flag %}
+              <form method="post" action="/admin/accounts/{{ a.id }}/clear-flag" style="margin-bottom:.35rem">
+                <input type="hidden" name="token" value="{{ token }}">
+                <button class="mini">clear flag</button>
+              </form>
+              {% endif %}
               <form method="post" action="/admin/accounts/{{ a.id }}/delete"
                     onsubmit="return confirm('Remove {{ p.name }} ({{ a.platform }})? This deletes their history.')">
                 <input type="hidden" name="token" value="{{ token }}">

@@ -127,7 +127,9 @@ def _standing_json(s: Standing) -> dict:
         "participant": s.name,
         "participant_id": s.participant_id,
         "game_value": round(s.game_value, 2),
-        "pnl": round(s.pnl, 2),
+        "pnl": round(s.pnl_capped, 2),  # display P&L, capped at -$100
+        "pnl_raw": round(s.pnl, 2),  # uncapped, for transparency
+        "busted": s.busted,
         "pnl_pct": round(s.pnl_pct, 2),
         "flags": s.flags,
         "accounts": [

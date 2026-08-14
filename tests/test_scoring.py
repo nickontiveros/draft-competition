@@ -305,3 +305,69 @@ async def test_stub_without_fetch_open_orders_still_syncs(monkeypatch):
     with db_session() as db:
         standings = compute_standings(db)
     assert standings[0].game_value == pytest.approx(100.0)
+
+
+async def test_deposit_adjustment_preserves_trading_pnl(monkeypatch):
+    """A recorded top-up shifts the baseline instead of counting as profit."""
+    alice = seed("alice")
+    # Joined underfunded at $60, then made $5 of real trading profit.
+    await sync_with(alice, StubConnector(AccountState(cash=60, positions_value=0)), monkeypatch)
+    await sync_with(alice, StubConnector(AccountState(cash=15, positions_value=50)), monkeypatch)
+
+    # Tops up $40: tracker sees $105 total -> +$45 without correction.
+    await sync_with(alice, StubConnector(AccountState(cash=55, positions_value=50)), monkeypatch)
+    with db_session() as db:
+        standings = compute_standings(db)
+    assert standings[0].pnl == pytest.approx(45.0)
+
+    # Admin records the $40 deposit: only the $5 of trading P&L remains.
+    with db_session() as db:
+        account = db.get(Account, alice)
+        account.baseline_adjustment += 40.0
+        account.deposit_flag = ""
+    with db_session() as db:
+        standings = compute_standings(db)
+    assert standings[0].pnl == pytest.approx(5.0)
+    assert standings[0].game_value == pytest.approx(105.0)
+    assert standings[0].history[-1][1] == pytest.approx(5.0)  # history shifts too
+
+
+async def test_rebaseline_account_resets_everything(monkeypatch):
+    from app.scoring import rebaseline_account
+
+    alice = seed("alice")
+    await sync_with(alice, StubConnector(AccountState(cash=60, positions_value=0)), monkeypatch)
+    await sync_with(alice, StubConnector(AccountState(cash=100, positions_value=0)), monkeypatch)
+    with db_session() as db:
+        account = db.get(Account, alice)
+        account.deposit_flag = "cash +$40.00 not explained"
+        account.baseline_adjustment = 7.0
+
+    with db_session() as db:
+        account = db.get(Account, alice)
+        assert rebaseline_account(db, account) is True
+
+    with db_session() as db:
+        account = db.get(Account, alice)
+        standings = compute_standings(db)
+    assert account.deposit_flag == ""
+    assert account.baseline_adjustment == 0.0
+    assert standings[0].pnl == pytest.approx(0.0)
+    assert standings[0].game_value == pytest.approx(100.0)
+
+
+async def test_busted_floor(monkeypatch):
+    """Losses beyond the $100 stake cap: bankroll floors at $0 with BUSTED."""
+    alice = seed("alice")
+    await sync_with(alice, StubConnector(AccountState(cash=250, positions_value=0)), monkeypatch)
+    # Real account loses $130 — more than the game stake.
+    await sync_with(alice, StubConnector(AccountState(cash=120, positions_value=0)), monkeypatch)
+
+    with db_session() as db:
+        standings = compute_standings(db)
+    s = standings[0]
+    assert s.pnl == pytest.approx(-130.0)  # true loss preserved
+    assert s.pnl_capped == pytest.approx(-100.0)
+    assert s.game_value == pytest.approx(0.0)
+    assert s.pnl_pct == pytest.approx(-100.0)
+    assert s.busted is True

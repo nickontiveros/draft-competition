@@ -109,6 +109,9 @@ def _repair_zero_position_baselines(engine) -> None:
     Patch the cost basis of positions the fill ledger shows open at the
     baseline timestamp into those snapshots."""
     from datetime import datetime
+    from datetime import timezone as _tz
+
+    UTC = _tz.utc
 
     from app.scoring import open_position_cost
 
@@ -118,12 +121,21 @@ def _repair_zero_position_baselines(engine) -> None:
     with engine.begin() as conn:
         baselines = conn.execute(
             text(
-                "SELECT a.id, s.id, s.ts, s.cash FROM accounts a "
+                "SELECT a.id, s.id, s.ts, s.cash, a.open_markets_json "
+                "FROM accounts a "
                 "JOIN snapshots s ON s.id = a.baseline_snapshot_id "
                 "WHERE s.positions_value = 0"
             )
         ).all()
-        for account_id, snap_id, snap_ts, cash in baselines:
+        for account_id, snap_id, snap_ts, cash, open_markets_json in baselines:
+            # Ledger exposure only counts for markets open per the API right
+            # now, or that the ledger itself closes after the snapshot. A
+            # stale ledger entry (settlement missed by the sync lookback)
+            # must not inflate the baseline — its proceeds are already cash.
+            try:
+                api_open = set(json.loads(open_markets_json or "[]"))
+            except ValueError:
+                api_open = set()
             fills = conn.execute(
                 text(
                     "SELECT ts, market_key, side, kind, notional "
@@ -136,7 +148,20 @@ def _repair_zero_position_baselines(engine) -> None:
                 for ts, mk, side, kind, notional in fills
                 if ts
             ]
-            cost = open_position_cost(parsed, parse_ts(snap_ts))
+            snap_dt = parse_ts(snap_ts)
+            snap_utc = snap_dt if snap_dt.tzinfo else snap_dt.replace(tzinfo=UTC)
+            closed_later = {
+                mk
+                for ts, mk, side, _k, _n in parsed
+                if mk
+                and side in ("sell", "settle")
+                and (ts if ts.tzinfo else ts.replace(tzinfo=UTC)) >= snap_utc
+            }
+            allowed = api_open | closed_later
+            if not allowed:
+                continue
+            parsed = [row for row in parsed if row[1] in allowed]
+            cost = open_position_cost(parsed, snap_dt)
             if cost > 0:
                 conn.execute(
                     text(

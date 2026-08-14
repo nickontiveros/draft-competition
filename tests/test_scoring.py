@@ -371,3 +371,44 @@ async def test_busted_floor(monkeypatch):
     assert s.game_value == pytest.approx(0.0)
     assert s.pnl_pct == pytest.approx(-100.0)
     assert s.busted is True
+
+
+async def test_heal_skipped_for_stale_ledger_settled_positions(monkeypatch):
+    """Ben's bug: two bets settled BEFORE the tracker ever saw the account, so
+    the ledger has buys with no settlement rows, while Kalshi reports no open
+    positions (proceeds already in cash). Healing from that stale ledger
+    inflated the baseline by the phantom $4.72 on every rebaseline, making him
+    read as a permanent loss after each scheduled sync."""
+    from app.scoring import rebaseline_account
+
+    ben = seed("ben", platform="kalshi")
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    stale_buys = [
+        NormalizedFill(
+            external_id=f"t-old-{i}", ts=week_ago, market_title="Settled market?",
+            outcome="Yes", side="buy", size=4, price=0.59,
+            market_key=f"KXSETTLED-{i}",
+        )
+        for i in range(2)
+    ]
+    # API truth: no open positions, all value is cash.
+    state = AccountState(cash=155.69, positions_value=0.0, open_market_keys=set())
+    await sync_with(ben, StubConnector(state, fills=stale_buys), monkeypatch)
+
+    with db_session() as db:
+        standings = compute_standings(db)
+        account = db.get(Account, ben)
+        baseline = db.get(Snapshot, account.baseline_snapshot_id)
+    assert baseline.positions_value == 0.0  # NOT healed to phantom $4.72
+    assert baseline.total_value == pytest.approx(155.69)
+    assert standings[0].pnl == pytest.approx(0.0)
+    assert standings[0].game_value == pytest.approx(100.0)
+
+    # Rebaseline + another identical sync: still exactly $100, no recurring dip.
+    with db_session() as db:
+        account = db.get(Account, ben)
+        assert rebaseline_account(db, account) is True
+    await sync_with(ben, StubConnector(state, fills=stale_buys), monkeypatch)
+    with db_session() as db:
+        standings = compute_standings(db)
+    assert standings[0].game_value == pytest.approx(100.0)

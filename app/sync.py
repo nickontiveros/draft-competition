@@ -62,10 +62,14 @@ async def sync_account(account_id: int) -> None:
         prev = _latest_snapshot(db, account_id)
 
     since = datetime.now(timezone.utc) - (LOOKBACK if prev else FIRST_SYNC_LOOKBACK)
+    # Settlements always use the long lookback: they're low-volume, and a
+    # settlement missed by a short window leaves the ledger believing a
+    # position is still open forever (which poisons baseline healing).
+    settle_since = datetime.now(timezone.utc) - FIRST_SYNC_LOOKBACK
     try:
         state = await connector.fetch_state()
         fills = await connector.fetch_fills(since=since)
-        settlements = await connector.fetch_settlements(since=since)
+        settlements = await connector.fetch_settlements(since=settle_since)
         # Resting (unfilled) limit orders — common on thin non-sports books.
         # getattr guard keeps older stub/custom connectors working.
         fetch_orders = getattr(connector, "fetch_open_orders", None)
@@ -123,6 +127,11 @@ async def sync_account(account_id: int) -> None:
             )
             new_fills += 1
 
+        # Current API-reported open positions — stored BEFORE the baseline
+        # stamp below, because heal_snapshot_positions only trusts ledger
+        # exposure for markets the platform says are open right now.
+        account.open_markets_json = json.dumps(sorted(state.open_market_keys))
+
         # The $100 game measures P&L from each account's first snapshot.
         # Stamped after the fill insert above so heal_snapshot_positions can
         # see the full ledger: a candidate snapshot claiming $0 in positions
@@ -147,7 +156,6 @@ async def sync_account(account_id: int) -> None:
         if prev is not None:
             _check_deposit(account, prev, state.cash, events)
 
-        account.open_markets_json = json.dumps(sorted(state.open_market_keys))
         account.pending_orders_json = json.dumps(
             [o.as_json() for o in sorted(orders, key=lambda o: o.ts, reverse=True)]
         )

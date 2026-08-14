@@ -164,6 +164,10 @@ def participant_history(db: Session, participant: Participant, points: int = 60)
     return history[-points:]
 
 
+def _as_utc_ts(ts: datetime) -> datetime:
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
 def open_position_cost(fills: list[tuple], at_ts: datetime) -> float:
     """Cost basis of positions still open at `at_ts`, inferred from the fill
     ledger: per market, dollars in (buys) minus dollars back (sells and
@@ -195,15 +199,34 @@ def open_position_cost(fills: list[tuple], at_ts: datetime) -> float:
 def heal_snapshot_positions(db: Session, account_id: int, snap: Snapshot) -> bool:
     """If a snapshot about to become a baseline claims zero position value
     while the fill ledger shows open exposure at its timestamp, patch in the
-    cost basis. Returns True when the snapshot was changed."""
+    cost basis. Returns True when the snapshot was changed.
+
+    Ledger exposure only counts for markets that are either open per the
+    platform RIGHT NOW, or that the ledger itself closes (sell/settle row)
+    after the snapshot — proof the ledger is complete for that market. A
+    market the API says is closed with no closing row in the ledger is a
+    STALE ledger entry (its settlement fell outside the sync lookback, the
+    proceeds already sit in cash); healing from it inflates the baseline and
+    makes the player read as a permanent loss."""
     if snap.positions_value:
         return False
+    account = db.get(Account, account_id)
+    api_open = account.open_markets if account else set()
     rows = db.execute(
         select(Fill.ts, Fill.market_key, Fill.side, Fill.kind, Fill.notional).where(
             Fill.account_id == account_id
         )
     ).all()
-    cost = open_position_cost(rows, snap.ts)
+    snap_ts = _as_utc_ts(snap.ts)
+    closed_later = {
+        mk
+        for ts, mk, side, _kind, _n in rows
+        if mk and side in ("sell", "settle") and _as_utc_ts(ts) >= snap_ts
+    }
+    allowed = api_open | closed_later
+    if not allowed:
+        return False
+    cost = open_position_cost([r for r in rows if r.market_key in allowed], snap.ts)
     if cost <= 0:
         return False
     snap.positions_value = round(cost, 4)

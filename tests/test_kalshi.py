@@ -64,6 +64,9 @@ def make_transport(rsa_public_key):
             return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_fills.json").read_text()))
         if route == "/portfolio/settlements":
             return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_settlements.json").read_text()))
+        if route == "/portfolio/orders":
+            assert request.url.params["status"] == "resting"
+            return httpx.Response(200, json=json.loads((FIXTURES / "kalshi_orders.json").read_text()))
         if route.startswith("/series/"):
             ticker = route.removeprefix("/series/")
             series = json.loads((FIXTURES / "kalshi_series.json").read_text())
@@ -144,3 +147,24 @@ async def test_fetch_fills_normalization(connector):
     assert no_sell.price == pytest.approx(0.55)  # legacy no_price cents for NO-side fills
     assert no_sell.side == "sell"
     assert no_sell.size == 10
+
+
+async def test_fetch_open_orders(connector):
+    orders = await connector.fetch_open_orders()
+    # ord-4 is canceled and filtered out.
+    assert [o.order_id for o in orders] == ["ord-1", "ord-2", "ord-3"]
+
+    fp_buy = orders[0]  # fixed-point schema
+    assert fp_buy.market_key == "KXFEDDECISION-26SEP"
+    assert fp_buy.outcome == "Yes"
+    assert fp_buy.side == "buy"
+    assert fp_buy.size == 40
+    assert fp_buy.price == 0.35
+    assert fp_buy.reserved == 14.0  # 40 x $0.35 locked
+
+    legacy_buy = orders[1]  # legacy cents schema, NO side
+    assert legacy_buy.price == 0.45
+    assert legacy_buy.reserved == 4.5
+
+    sell = orders[2]  # sells reserve contracts, not cash
+    assert sell.reserved == 0.0

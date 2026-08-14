@@ -24,6 +24,11 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
     },
     "accounts": {
         "open_markets_json": "VARCHAR NOT NULL DEFAULT '[]'",
+        "pending_orders_json": "VARCHAR NOT NULL DEFAULT '[]'",
+        "last_sync_note": "VARCHAR NOT NULL DEFAULT ''",
+    },
+    "snapshots": {
+        "reserved": "FLOAT NOT NULL DEFAULT 0",
     },
 }
 

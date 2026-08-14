@@ -33,7 +33,7 @@ class BetEntry:
     avg_price: float  # dollars per contract on buys
     wagered: float
     returned: float
-    status: str  # "open" | "won" | "lost" | "pre-game"
+    status: str  # "open" | "won" | "lost" | "pre-game" | "pending"
     last_ts: datetime
     url: str | None = None  # market page on the source platform
 
@@ -112,7 +112,10 @@ def compute_player_stats(db: Session, participant: Participant) -> PlayerStats:
         for f in fills:
             groups.setdefault(f.market_key or f.external_id, []).append(f)
 
-        keys = [k for k in groups if k]
+        pending = account.pending_orders
+        keys = [k for k in groups if k] + [
+            o["market_key"] for o in pending if o.get("market_key")
+        ]
         metas = {
             m.market_key: m
             for m in db.scalars(
@@ -175,10 +178,38 @@ def compute_player_stats(db: Session, participant: Participant) -> PlayerStats:
                 )
             )
 
+        # Resting (unfilled) orders — bets placed but not yet matched. Shown
+        # in the ledger so "where's my bet?" has an answer; excluded from
+        # stats since no money is at risk until the order fills.
+        for od in pending:
+            key = od.get("market_key", "")
+            meta = metas.get(key)
+            try:
+                ts = datetime.fromisoformat(od.get("ts", ""))
+            except ValueError:
+                ts = datetime.now(timezone.utc)
+            all_entries.append(
+                BetEntry(
+                    market_key=key,
+                    platform=account.platform,
+                    title=(meta.title if meta and meta.title else key),
+                    category=(meta.category if meta and meta.category else "Other"),
+                    outcome=od.get("outcome", ""),
+                    yes_sub_title=meta.yes_sub_title if meta else "",
+                    contracts=od.get("size", 0.0),
+                    avg_price=od.get("price", 0.0),
+                    wagered=od.get("reserved", 0.0),
+                    returned=0.0,
+                    status="pending",
+                    last_ts=_as_utc(ts),
+                    url=bet_url(account.platform, key, None, _meta_raw(meta)),
+                )
+            )
+
     all_entries.sort(key=lambda e: e.last_ts, reverse=True)
     stats.entries = all_entries
 
-    in_game = [e for e in all_entries if e.status != "pre-game"]
+    in_game = [e for e in all_entries if e.status not in ("pre-game", "pending")]
     stats.bets_placed = len(in_game)
     stats.total_wagered = sum(e.wagered for e in in_game)
     decided = [e for e in in_game if e.status in ("won", "lost")]

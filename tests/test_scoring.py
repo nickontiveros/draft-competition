@@ -237,3 +237,71 @@ async def test_baseline_stamped_during_broken_valuation_is_healed(monkeypatch):
     # True profit is payout minus cost (6.63 - 4.90), not the whole payout.
     assert standings[0].pnl == pytest.approx(1.73, abs=0.01)
     assert standings[0].game_value == pytest.approx(101.73, abs=0.01)
+
+
+def pending_order(order_id="ord-1", market_key="KXFEDDECISION-26SEP", reserved=14.0):
+    from app.connectors.base import PendingOrder
+
+    return PendingOrder(
+        order_id=order_id,
+        market_key=market_key,
+        outcome="Yes",
+        side="buy",
+        size=40,
+        price=reserved / 40,
+        reserved=reserved,
+        ts=datetime.now(timezone.utc),
+    )
+
+
+class StubWithOrders(StubConnector):
+    def __init__(self, state, orders=None, **kw):
+        super().__init__(state, **kw)
+        self.orders = orders or []
+
+    async def fetch_open_orders(self):
+        return self.orders
+
+
+async def test_resting_order_reserved_counts_in_total(monkeypatch):
+    """Placing a resting order moves cash into reserve on the platform; the
+    tracker must not read that as a loss."""
+    alice = seed("alice", platform="kalshi")
+    await sync_with(alice, StubConnector(AccountState(cash=100, positions_value=0)), monkeypatch)
+
+    # $14 now reserved for a resting order: platform balance drops to $86.
+    await sync_with(
+        alice,
+        StubWithOrders(AccountState(cash=86, positions_value=0), orders=[pending_order()]),
+        monkeypatch,
+    )
+    with db_session() as db:
+        standings = compute_standings(db)
+        account = db.get(Account, alice)
+    assert standings[0].game_value == pytest.approx(100.0)  # no phantom loss
+    assert account.pending_orders[0]["market_key"] == "KXFEDDECISION-26SEP"
+    assert account.pending_orders[0]["reserved"] == pytest.approx(14.0)
+    assert "1 resting orders" in account.last_sync_note
+
+
+async def test_canceled_order_does_not_trip_deposit_flag(monkeypatch):
+    alice = seed("alice", platform="kalshi")
+    await sync_with(
+        alice,
+        StubWithOrders(AccountState(cash=80, positions_value=0), orders=[pending_order(reserved=20.0)]),
+        monkeypatch,
+    )
+    # Order canceled: the $20 reserve returns to cash. Not a deposit.
+    await sync_with(alice, StubWithOrders(AccountState(cash=100, positions_value=0)), monkeypatch)
+    with db_session() as db:
+        account = db.get(Account, alice)
+    assert account.deposit_flag == ""
+
+
+async def test_stub_without_fetch_open_orders_still_syncs(monkeypatch):
+    """Connectors predating the orders API keep working (getattr guard)."""
+    alice = seed("alice")
+    await sync_with(alice, StubConnector(AccountState(cash=50, positions_value=50)), monkeypatch)
+    with db_session() as db:
+        standings = compute_standings(db)
+    assert standings[0].game_value == pytest.approx(100.0)

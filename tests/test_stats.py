@@ -143,3 +143,35 @@ def test_meta_enriches_title_and_outcome(player):
     won = next(e for e in stats.entries if e.market_key == "mkt-won")
     assert won.title == "Yankees beat the Red Sox?"
     assert won.outcome_label == "Yankees win"  # Yes + yes_sub_title
+
+
+def test_pending_orders_render_but_do_not_count(player):
+    with db_session() as db:
+        a = db.query(Account).filter_by(identifier="key-1").first()
+        a.pending_orders_json = json.dumps(
+            [
+                {
+                    "order_id": "ord-9",
+                    "market_key": "mkt-won",  # meta exists -> title/category resolve
+                    "outcome": "Yes",
+                    "side": "buy",
+                    "size": 40.0,
+                    "price": 0.35,
+                    "reserved": 14.0,
+                    "ts": NOW.isoformat(),
+                }
+            ]
+        )
+    with db_session() as db:
+        p = db.get(Participant, player)
+        stats = compute_player_stats(db, p)
+
+    pending = [e for e in stats.entries if e.status == "pending"]
+    assert len(pending) == 1
+    assert pending[0].title == "Yankees beat the Red Sox?"  # enriched via MarketMeta
+    assert pending[0].wagered == pytest.approx(14.0)
+    assert pending[0].pnl is None
+    # Excluded from every stat: same totals as without the order.
+    assert stats.bets_placed == 3
+    assert stats.total_wagered == pytest.approx(23.0)
+    assert stats.win_rate == pytest.approx(50.0)

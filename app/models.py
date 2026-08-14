@@ -46,10 +46,18 @@ class Account(Base):
     deposit_flag: Mapped[str] = mapped_column(String, default="")
     # JSON list of market keys with an open position, refreshed each sync.
     open_markets_json: Mapped[str] = mapped_column(String, default="[]")
+    # JSON list of resting (unfilled) orders, refreshed each sync.
+    pending_orders_json: Mapped[str] = mapped_column(String, default="[]")
+    # Human-readable summary of what the last successful sync captured.
+    last_sync_note: Mapped[str] = mapped_column(String, default="")
 
     @property
     def open_markets(self) -> set[str]:
         return set(json.loads(self.open_markets_json or "[]"))
+
+    @property
+    def pending_orders(self) -> list[dict]:
+        return json.loads(self.pending_orders_json or "[]")
 
     participant: Mapped[Participant] = relationship(back_populates="accounts")
     baseline_snapshot: Mapped[Snapshot | None] = relationship(foreign_keys=[baseline_snapshot_id])
@@ -63,6 +71,8 @@ class Snapshot(Base):
     ts: Mapped[datetime] = mapped_column(default=utcnow, index=True)
     cash: Mapped[float] = mapped_column(default=0.0)
     positions_value: Mapped[float] = mapped_column(default=0.0)
+    # Cash locked in resting buy orders (excluded from the platform's balance).
+    reserved: Mapped[float] = mapped_column(default=0.0)
     total_value: Mapped[float] = mapped_column(default=0.0)
 
 

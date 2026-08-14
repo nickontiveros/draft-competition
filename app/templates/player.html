@@ -104,7 +104,9 @@
           </td>
           <td>
             {{ b.outcome_label }}
-            {% if b.avg_price %}<div class="muted">@ {{ "%.0f"|format(b.avg_price * 100) }}¢ avg</div>{% endif %}
+            {% if b.status == "pending" %}
+            <div class="muted">resting order @ {{ "%.0f"|format(b.avg_price * 100) }}¢ — not filled yet</div>
+            {% elif b.avg_price %}<div class="muted">@ {{ "%.0f"|format(b.avg_price * 100) }}¢ avg</div>{% endif %}
           </td>
           <td class="num led">{% if b.wagered %}${{ "%.2f"|format(b.wagered) }}{% else %}—{% endif %}</td>
           <td class="num">

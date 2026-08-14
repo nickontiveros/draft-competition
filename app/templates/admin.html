@@ -38,6 +38,7 @@
               <span class="badge">{{ a.platform }}</span>
               <span class="muted">{{ a.identifier[:14] }}{% if a.identifier|length > 14 %}…{% endif %}</span>
               {% if a.last_sync_error %}<div class="flag">⚠️ {{ a.last_sync_error[:120] }}</div>{% endif %}
+              {% if a.last_sync_note %}<div class="muted">{{ a.last_sync_note }}</div>{% endif %}
             </td>
             <td class="muted">{{ a.last_sync_at.strftime("%m-%d %H:%M") if a.last_sync_at else "never" }}</td>
             <td>

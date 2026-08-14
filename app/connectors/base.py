@@ -11,10 +11,13 @@ class AccountState:
     positions_value: float
     # Market keys (Kalshi ticker / Polymarket conditionId) with an open position.
     open_market_keys: set[str] = field(default_factory=set)
+    # Cash committed to resting (unfilled) buy orders. Kalshi excludes this
+    # from the balance endpoint; without it, a resting order looks like a loss.
+    reserved: float = 0.0
 
     @property
     def total(self) -> float:
-        return self.cash + self.positions_value
+        return self.cash + self.positions_value + self.reserved
 
 
 @dataclass
@@ -37,6 +40,32 @@ class NormalizedFill:
 
 
 @dataclass
+class PendingOrder:
+    """A resting (unfilled) limit order — a bet placed but not yet matched."""
+
+    order_id: str
+    market_key: str
+    outcome: str  # "Yes" / "No"
+    side: str  # "buy" | "sell"
+    size: float  # contracts still unfilled
+    price: float  # limit price, dollars per contract
+    reserved: float  # cash locked for this order (0 for sells)
+    ts: datetime
+
+    def as_json(self) -> dict:
+        return {
+            "order_id": self.order_id,
+            "market_key": self.market_key,
+            "outcome": self.outcome,
+            "side": self.side,
+            "size": self.size,
+            "price": self.price,
+            "reserved": self.reserved,
+            "ts": self.ts.isoformat(),
+        }
+
+
+@dataclass
 class MarketInfo:
     title: str = ""
     category: str = ""
@@ -52,6 +81,8 @@ class Connector(Protocol):
     async def fetch_fills(self, since: datetime | None = None) -> list[NormalizedFill]: ...
 
     async def fetch_settlements(self, since: datetime | None = None) -> list[NormalizedFill]: ...
+
+    async def fetch_open_orders(self) -> list[PendingOrder]: ...
 
     async def fetch_market_meta(
         self, keys: list[str], hints: dict[str, dict] | None = None

@@ -11,7 +11,7 @@ import math
 import time
 from datetime import datetime, timedelta, timezone
 
-from app.connectors.base import AccountState, MarketInfo, NormalizedFill
+from app.connectors.base import AccountState, MarketInfo, NormalizedFill, PendingOrder
 
 _MARKETS = [
     ("mkt-fed", "Fed cuts rates in September?", "Yes", "Economics"),
@@ -99,6 +99,25 @@ class MockConnector:
                 )
             )
         return out
+
+    async def fetch_open_orders(self) -> list[PendingOrder]:
+        # One resting order on a market with no position (index 5: not among
+        # the open markets 0-2 or the settled markets 3-4), for demo/E2E.
+        key, title, outcome, _cat = self._market(5)
+        size = float(self.seed % 20 + 10)
+        price = (self.seed % 40 + 20) / 100
+        return [
+            PendingOrder(
+                order_id=f"mock-order-{self.seed}",
+                market_key=key,
+                outcome="Yes",
+                side="buy",
+                size=size,
+                price=price,
+                reserved=round(size * price, 2),
+                ts=datetime.now(timezone.utc) - timedelta(minutes=self.seed % 45),
+            )
+        ]
 
     async def fetch_market_meta(
         self, keys: list[str], hints: dict[str, dict] | None = None

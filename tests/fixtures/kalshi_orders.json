@@ -1,0 +1,48 @@
+{
+  "orders": [
+    {
+      "order_id": "ord-1",
+      "ticker": "KXFEDDECISION-26SEP",
+      "status": "resting",
+      "side": "yes",
+      "action": "buy",
+      "remaining_count_fp": "40.00",
+      "yes_price_dollars": "0.35",
+      "no_price_dollars": "0.65",
+      "created_time": "2026-08-14T15:00:00Z"
+    },
+    {
+      "order_id": "ord-2",
+      "ticker": "KXCPI-26AUG-A3",
+      "status": "resting",
+      "side": "no",
+      "action": "buy",
+      "remaining_count": 10,
+      "yes_price": 55,
+      "no_price": 45,
+      "created_time": "2026-08-14T14:00:00Z"
+    },
+    {
+      "order_id": "ord-3",
+      "ticker": "KXMLB-26AUG14-NYY",
+      "status": "resting",
+      "side": "yes",
+      "action": "sell",
+      "remaining_count_fp": "5.00",
+      "yes_price_dollars": "0.80",
+      "no_price_dollars": "0.20",
+      "created_time": "2026-08-14T13:00:00Z"
+    },
+    {
+      "order_id": "ord-4",
+      "ticker": "KXGONE-26AUG",
+      "status": "canceled",
+      "side": "yes",
+      "action": "buy",
+      "remaining_count_fp": "99.00",
+      "yes_price_dollars": "0.10",
+      "created_time": "2026-08-14T12:00:00Z"
+    }
+  ],
+  "cursor": ""
+}

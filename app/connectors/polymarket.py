@@ -141,6 +141,12 @@ class PolymarketConnector:
             )
         return out
 
+    async def fetch_open_orders(self) -> list:
+        """Polymarket limit orders don't move USDC until matched (the wallet
+        balance already reflects them), and the CLOB open-orders API needs
+        trading credentials we don't hold — nothing to report."""
+        return []
+
     async def fetch_market_meta(
         self, keys: list[str], hints: dict[str, dict] | None = None
     ) -> dict[str, MarketInfo]:

@@ -63,12 +63,20 @@ async def sync_account(account_id: int) -> None:
         state = await connector.fetch_state()
         fills = await connector.fetch_fills(since=since)
         settlements = await connector.fetch_settlements(since=since)
+        # Resting (unfilled) limit orders — common on thin non-sports books.
+        # getattr guard keeps older stub/custom connectors working.
+        fetch_orders = getattr(connector, "fetch_open_orders", None)
+        orders = await fetch_orders() if fetch_orders else []
     except Exception as exc:  # noqa: BLE001 - isolate per-account failures
         logger.warning("sync failed for account %s: %s", account_id, exc)
         with db_session() as db:
             account = db.get(Account, account_id)
             account.last_sync_error = _friendly_error(platform, exc)
         return
+
+    # Kalshi's balance excludes cash reserved for resting buys; add it back so
+    # placing an order doesn't read as a loss.
+    state.reserved = round(sum(o.reserved for o in orders), 4)
 
     events = fills + settlements
     with db_session() as db:
@@ -78,6 +86,7 @@ async def sync_account(account_id: int) -> None:
             account_id=account_id,
             cash=state.cash,
             positions_value=state.positions_value,
+            reserved=state.reserved,
             total_value=state.total,
         )
         db.add(snapshot)
@@ -136,17 +145,36 @@ async def sync_account(account_id: int) -> None:
             _check_deposit(account, prev, state.cash, events)
 
         account.open_markets_json = json.dumps(sorted(state.open_market_keys))
+        account.pending_orders_json = json.dumps(
+            [o.as_json() for o in sorted(orders, key=lambda o: o.ts, reverse=True)]
+        )
         account.last_sync_at = datetime.now(timezone.utc)
         account.last_sync_error = ""
+        note = (
+            f"{len(fills)} fills ({new_fills} new) · {len(settlements)} settlements "
+            f"· {len(orders)} resting orders"
+        )
+        account.last_sync_note = note
         logger.info(
-            "synced account %s (%s): total=%.2f, %d new fills",
-            account_id,
-            platform,
-            state.total,
-            new_fills,
+            "synced account %s (%s): total=%.2f, %s", account_id, platform, state.total, note
         )
 
-    await _enrich_market_meta(connector, platform, events)
+    # Enrich metadata for traded AND resting-order markets, so pending bets
+    # get real titles/categories too.
+    order_stubs = [
+        NormalizedFill(
+            external_id=f"order-{o.order_id}",
+            ts=o.ts,
+            market_title=o.market_key,
+            outcome=o.outcome,
+            side=o.side,
+            size=o.size,
+            price=o.price,
+            market_key=o.market_key,
+        )
+        for o in orders
+    ]
+    await _enrich_market_meta(connector, platform, events + order_stubs)
 
 
 def _friendly_error(platform: str, exc: Exception) -> str:
@@ -281,8 +309,10 @@ def _check_deposit(
     explained = sum(
         e.notional for e in events if e.side in ("sell", "settle") and e.ts >= prev_ts
     )
-    # Allow generous slack: any open position could also have settled at $1.
-    if cash_increase > explained + prev.positions_value + DEPOSIT_FLAG_THRESHOLD:
+    # Allow generous slack: any open position could also have settled at $1,
+    # and canceling a resting order returns its reserved cash.
+    reserved_slack = getattr(prev, "reserved", 0.0) or 0.0
+    if cash_increase > explained + prev.positions_value + reserved_slack + DEPOSIT_FLAG_THRESHOLD:
         account.deposit_flag = (
             f"cash +${cash_increase:.2f} at {datetime.now(timezone.utc):%m-%d %H:%M} UTC "
             "not explained by sells/settlements"

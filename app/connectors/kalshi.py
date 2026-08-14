@@ -23,7 +23,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 from app.config import settings
-from app.connectors.base import AccountState, MarketInfo, NormalizedFill
+from app.connectors.base import AccountState, MarketInfo, NormalizedFill, PendingOrder
 
 # Series-ticker prefixes -> sport, for when Kalshi's category is just "Sports".
 SERIES_SPORTS = {
@@ -112,6 +112,33 @@ def normalize_settlement(s: dict) -> NormalizedFill:
         kind="settlement",
         notional=revenue,
         raw=s,
+    )
+
+
+def normalize_order(o: dict) -> PendingOrder:
+    """Normalize a raw /portfolio/orders entry (both schema generations).
+    Reserved cash applies to buy orders only — sell orders reserve contracts,
+    which the positions endpoint already values."""
+    side = o.get("side", "yes")  # "yes" | "no"
+    price_dollars = o.get(f"{side}_price_dollars")
+    if price_dollars is not None:
+        price = _fp(price_dollars)
+    else:  # legacy cents fields
+        price = (o.get("yes_price", 0) if side == "yes" else o.get("no_price", 0)) / 100
+    if o.get("remaining_count_fp") is not None:
+        size = _fp(o["remaining_count_fp"])
+    else:
+        size = float(o.get("remaining_count", 0) or 0)
+    action = (o.get("action") or "buy").lower()
+    return PendingOrder(
+        order_id=o.get("order_id", ""),
+        market_key=o.get("ticker", ""),
+        outcome=side.capitalize(),
+        side=action,
+        size=size,
+        price=price,
+        reserved=round(size * price, 4) if action == "buy" else 0.0,
+        ts=_parse_time(o.get("created_time", "")),
     )
 
 
@@ -237,6 +264,26 @@ class KalshiConnector:
             params["min_ts"] = int(since.timestamp())
         data = await self._get("/portfolio/settlements", params)
         return [normalize_settlement(s) for s in data.get("settlements", [])]
+
+    async def fetch_open_orders(self) -> list[PendingOrder]:
+        """Resting (unfilled) limit orders — invisible to fills/positions, but
+        their reserved cash is excluded from the balance endpoint."""
+        params: dict = {"limit": 100, "status": "resting"}
+        orders: list[PendingOrder] = []
+        cursor = None
+        while True:
+            if cursor:
+                params["cursor"] = cursor
+            data = await self._get("/portfolio/orders", params)
+            orders.extend(
+                normalize_order(o)
+                for o in data.get("orders", [])
+                if (o.get("status") or "resting") == "resting"
+            )
+            cursor = data.get("cursor")
+            if not cursor:
+                break
+        return [o for o in orders if o.size > 0]
 
     async def _series(self, series_tickers: list[str]) -> dict[str, dict]:
         """Series objects by ticker; a series that can't be fetched maps to {}."""

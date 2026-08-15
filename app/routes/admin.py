@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Form, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -12,9 +13,9 @@ from sqlalchemy.orm import joinedload
 from app.config import settings
 from app.db import db_session
 from app.models import Account, Participant
-from app.scoring import lock_baselines, rebaseline_account
+from app.scoring import backdate_baseline, lock_baselines, rebaseline_account
 from app.services import create_account, delete_account
-from app.sync import sync_account, sync_all
+from app.sync import FIRST_SYNC_LOOKBACK, backfill_history, sync_account, sync_all
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory="app/templates")
@@ -162,6 +163,54 @@ async def rebaseline(
         if not rebaseline_account(db, account):
             raise HTTPException(
                 409, "account has no snapshot yet — check its sync error and retry"
+            )
+    return RedirectResponse(f"/admin?token={token or x_admin_token}", status_code=303)
+
+
+@router.post("/accounts/{account_id}/backdate")
+async def backdate(
+    account_id: int,
+    to: str = Form(...),
+    token: str = Form(None),
+    x_admin_token: str | None = Header(None),
+):
+    """Move a late joiner's baseline back to a past moment: sync fresh, then
+    backfill the ledger to that moment and reconstruct a synthetic baseline
+    from the cash-flow replay. Their betting counts from that moment on."""
+    _check_token(token or x_admin_token)
+    try:
+        to_ts = datetime.fromisoformat(to)
+    except ValueError:
+        raise HTTPException(400, f"can't parse {to!r} as a date/time")
+    if to_ts.tzinfo is None:
+        to_ts = to_ts.replace(tzinfo=timezone.utc)  # form input is UTC
+    now = datetime.now(timezone.utc)
+    if to_ts >= now:
+        raise HTTPException(400, "backdate target must be in the past")
+    if to_ts < now - FIRST_SYNC_LOOKBACK:
+        raise HTTPException(
+            400,
+            f"backdate target can be at most {FIRST_SYNC_LOOKBACK.days} days back — "
+            "the platforms' history fetches (and therefore the replay) can't be "
+            "trusted beyond that",
+        )
+    with db_session() as db:
+        if db.get(Account, account_id) is None:
+            raise HTTPException(404, "no such account")
+
+    await sync_account(account_id)  # fresh snapshot to replay from
+    try:
+        await backfill_history(account_id, since=to_ts)
+    except Exception as exc:  # noqa: BLE001 - incomplete ledger => no backdate
+        raise HTTPException(
+            502, f"couldn't backfill trade history to that date, not backdating: {exc}"
+        )
+
+    with db_session() as db:
+        account = db.get(Account, account_id)
+        if account is None or backdate_baseline(db, account, to_ts) is None:
+            raise HTTPException(
+                409, "account has no snapshot to replay from — check its sync error"
             )
     return RedirectResponse(f"/admin?token={token or x_admin_token}", status_code=303)
 

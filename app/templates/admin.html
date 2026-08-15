@@ -57,6 +57,14 @@
                        style="width:9.5rem; display:inline-block">
                 <button class="mini">record</button>
               </form>
+              <form method="post" action="/admin/accounts/{{ a.id }}/backdate" style="margin-bottom:.35rem"
+                    onsubmit="return confirm('Backdate {{ p.name }} ({{ a.platform }})? Their betting will count from the chosen moment (UTC); earlier bets stay pre-game.')">
+                <input type="hidden" name="token" value="{{ token }}">
+                <input name="to" type="datetime-local" required
+                       title="UTC — baseline moves to this moment"
+                       style="width:11rem; display:inline-block">
+                <button class="mini">backdate</button>
+              </form>
               {% if a.deposit_flag %}
               <form method="post" action="/admin/accounts/{{ a.id }}/clear-flag" style="margin-bottom:.35rem">
                 <input type="hidden" name="token" value="{{ token }}">

@@ -211,27 +211,84 @@ def heal_snapshot_positions(db: Session, account_id: int, snap: Snapshot) -> boo
     if snap.positions_value:
         return False
     account = db.get(Account, account_id)
-    api_open = account.open_markets if account else set()
-    rows = db.execute(
-        select(Fill.ts, Fill.market_key, Fill.side, Fill.kind, Fill.notional).where(
-            Fill.account_id == account_id
-        )
-    ).all()
-    snap_ts = _as_utc_ts(snap.ts)
-    closed_later = {
-        mk
-        for ts, mk, side, _kind, _n in rows
-        if mk and side in ("sell", "settle") and _as_utc_ts(ts) >= snap_ts
-    }
-    allowed = api_open | closed_later
-    if not allowed:
+    if account is None:
         return False
-    cost = open_position_cost([r for r in rows if r.market_key in allowed], snap.ts)
+    cost = trusted_open_cost(db, account, snap.ts)
     if cost <= 0:
         return False
     snap.positions_value = round(cost, 4)
     snap.total_value = round(snap.cash + cost, 4)
     return True
+
+
+def trusted_open_cost(db: Session, account: Account, at_ts: datetime) -> float:
+    """Cost basis of positions the ledger shows open at `at_ts`, counting only
+    markets open per the platform right now (account.open_markets) or that
+    the ledger itself closes after `at_ts` — the stale-ledger trust rule
+    shared by baseline healing and backdating."""
+    rows = db.execute(
+        select(Fill.ts, Fill.market_key, Fill.side, Fill.kind, Fill.notional).where(
+            Fill.account_id == account.id
+        )
+    ).all()
+    at = _as_utc_ts(at_ts)
+    closed_later = {
+        mk
+        for ts, mk, side, _kind, _n in rows
+        if mk and side in ("sell", "settle") and _as_utc_ts(ts) >= at
+    }
+    allowed = account.open_markets | closed_later
+    if not allowed:
+        return 0.0
+    return open_position_cost([r for r in rows if r.market_key in allowed], at_ts)
+
+
+def backdate_baseline(db: Session, account: Account, to_ts: datetime) -> Snapshot | None:
+    """Stamp a synthetic baseline at past moment `to_ts`, reconstructed from
+    the ledger: replay cash flows backwards from the latest snapshot and
+    value positions open at `to_ts` at their cost basis (their market price
+    back then is unknowable). Deposits inside the window automatically land
+    in the baseline rather than P&L. Returns None when the account has no
+    snapshot to replay from — the ledger must be backfilled to `to_ts` first
+    for the replay to be complete."""
+    latest = latest_snapshot(db, account.id)
+    if latest is None:
+        return None
+    to_utc = _as_utc_ts(to_ts)
+    # Reserved counts as cash for the replay: a resting order's money is
+    # committed, not spent; if it fills, the buy row takes over below.
+    pool_now = latest.cash + (latest.reserved or 0.0)
+    rows = db.execute(
+        select(Fill.ts, Fill.side, Fill.kind, Fill.notional).where(
+            Fill.account_id == account.id
+        )
+    ).all()
+    buys_after = sum(
+        n or 0.0
+        for ts, side, kind, n in rows
+        if kind == "trade" and side == "buy" and _as_utc_ts(ts) > to_utc
+    )
+    inflows_after = sum(
+        n or 0.0
+        for ts, side, kind, n in rows
+        if side in ("sell", "settle") and _as_utc_ts(ts) > to_utc
+    )
+    cash_t = pool_now + buys_after - inflows_after
+    pos_t = trusted_open_cost(db, account, to_utc)
+    snap = Snapshot(
+        account_id=account.id,
+        ts=to_utc,
+        cash=round(cash_t, 4),
+        positions_value=round(pos_t, 4),
+        reserved=0.0,
+        total_value=round(cash_t + pos_t, 4),
+    )
+    db.add(snap)
+    db.flush()
+    account.baseline_snapshot_id = snap.id
+    account.baseline_adjustment = 0.0
+    account.deposit_flag = ""
+    return snap
 
 
 def rebaseline_account(db: Session, account: Account) -> bool:

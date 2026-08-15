@@ -412,3 +412,105 @@ async def test_heal_skipped_for_stale_ledger_settled_positions(monkeypatch):
     with db_session() as db:
         standings = compute_standings(db)
     assert standings[0].game_value == pytest.approx(100.0)
+
+
+def ledger_fill(account_id, market_key, side, notional, ts, kind="trade"):
+    from app.models import Fill
+
+    return Fill(
+        account_id=account_id, platform="kalshi",
+        external_id=f"{market_key}-{side}-{ts.timestamp()}", ts=ts,
+        market_title=market_key, outcome="Yes", side=side,
+        size=1, price=notional, market_key=market_key,
+        notional=notional, kind=kind,
+    )
+
+
+def test_backdate_baseline_replay_math():
+    """Synthetic baseline at T = (cash+reserved) now, replayed backwards
+    through post-T flows, plus cost basis of positions open at T."""
+    import json as _json
+
+    from app.scoring import backdate_baseline
+
+    now = datetime.now(timezone.utc)
+    T = now - timedelta(days=3)
+    with db_session() as db:
+        p = Participant(name="latejoiner")
+        db.add(p)
+        db.flush()
+        a = Account(
+            participant_id=p.id, platform="kalshi", identifier="k-late",
+            open_markets_json=_json.dumps(["MKT-A", "MKT-B"]),
+        )
+        db.add(a)
+        db.flush()
+        latest = Snapshot(
+            account_id=a.id, ts=now, cash=40.0, positions_value=25.0,
+            reserved=5.0, total_value=70.0,
+        )
+        db.add(latest)
+        db.add_all([
+            # A: bought before T, still open now -> in pos_T at cost.
+            ledger_fill(a.id, "MKT-A", "buy", 10.0, T - timedelta(days=1)),
+            # B: bought after T (replay adds $20 back), partially sold after T.
+            ledger_fill(a.id, "MKT-B", "buy", 20.0, T + timedelta(days=1)),
+            ledger_fill(a.id, "MKT-B", "sell", 8.0, T + timedelta(days=2)),
+            # C: bought before T, settled after T -> in pos_T; inflow replayed.
+            ledger_fill(a.id, "MKT-C", "buy", 12.0, T - timedelta(days=1)),
+            ledger_fill(a.id, "MKT-C", "settle", 15.0, T + timedelta(days=1), kind="settlement"),
+            # D: stale — bought before T, never closed, API says not open.
+            ledger_fill(a.id, "MKT-D", "buy", 7.0, T - timedelta(days=2)),
+        ])
+        db.flush()
+        snap = backdate_baseline(db, a, T)
+        account_id = a.id
+
+    # cash_T = (40 + 5) + 20 buys − (8 + 15) inflows = 42; pos_T = 10 + 12.
+    assert snap.cash == pytest.approx(42.0)
+    assert snap.positions_value == pytest.approx(22.0)
+    assert snap.total_value == pytest.approx(64.0)
+    assert snap.ts == T
+
+    with db_session() as db:
+        account = db.get(Account, account_id)
+        assert account.baseline_snapshot_id == snap.id
+        standings = compute_standings(db)
+    assert standings[0].pnl == pytest.approx(70.0 - 64.0)
+
+
+def test_backdate_is_deposit_neutral():
+    """A deposit inside the replay window lands in the baseline, not P&L."""
+    import json as _json
+
+    from app.scoring import backdate_baseline
+
+    now = datetime.now(timezone.utc)
+    T = now - timedelta(days=2)
+
+    def build(cash_now):
+        p = Participant(name=f"dep-{cash_now}")
+        a = Account(
+            participant_id=None, platform="kalshi", identifier=f"k-{cash_now}",
+            open_markets_json=_json.dumps([]),
+        )
+        return p, a, Snapshot(cash=cash_now, positions_value=0, reserved=0, total_value=cash_now, ts=now)
+
+    pnls = []
+    for cash_now in (100.0, 140.0):  # second scenario: +$40 deposited mid-window
+        with db_session() as db:
+            p, a, snap = build(cash_now)
+            db.add(p)
+            db.flush()
+            a.participant_id = p.id
+            db.add(a)
+            db.flush()
+            snap.account_id = a.id
+            db.add(snap)
+            db.flush()
+            backdate_baseline(db, a, T)
+        with db_session() as db:
+            standings = compute_standings(db)
+            pnls.append(next(s.pnl for s in standings if s.name == f"dep-{cash_now}"))
+    assert pnls[0] == pytest.approx(0.0)
+    assert pnls[1] == pytest.approx(0.0)  # the deposit never shows as profit

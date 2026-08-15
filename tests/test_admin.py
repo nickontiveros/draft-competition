@@ -196,3 +196,48 @@ def test_history_endpoint(monkeypatch):
     assert "cash" in data["last_sync_note"] and "positions" in data["last_sync_note"]
     assert "new rows" in data["last_sync_note"]
     assert client.get("/admin/accounts/999/history", params={"token": "tok"}).status_code == 404
+
+
+def test_backdate_endpoint(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setattr(settings, "mock_connectors", True)
+    add()
+    aid = _account_id()
+    now = datetime.now(timezone.utc)
+
+    def backdate(to, token="tok"):
+        return client.post(
+            f"/admin/accounts/{aid}/backdate",
+            data={"token": token, "to": to},
+            follow_redirects=False,
+        )
+
+    assert backdate((now + timedelta(hours=1)).isoformat()).status_code == 400  # future
+    assert backdate((now - timedelta(days=45)).isoformat()).status_code == 400  # too old
+    assert backdate("not-a-date").status_code == 400
+    assert backdate((now - timedelta(hours=2)).isoformat(), token="nope").status_code == 403
+
+    T = now - timedelta(hours=2)
+    with_db_flag_set()
+    resp = backdate(T.isoformat())
+    assert resp.status_code == 303
+
+    from app.db import db_session
+    from app.models import Account, Snapshot
+
+    with db_session() as db:
+        account = db.get(Account, aid)
+        baseline = db.get(Snapshot, account.baseline_snapshot_id)
+        ts = baseline.ts if baseline.ts.tzinfo else baseline.ts.replace(tzinfo=timezone.utc)
+    assert abs((ts - T).total_seconds()) < 1
+    assert account.deposit_flag == ""
+    assert account.baseline_adjustment == 0.0
+
+
+def with_db_flag_set():
+    from app.db import db_session
+    from app.models import Account
+
+    with db_session() as db:
+        db.query(Account).first().deposit_flag = "cash +$5.00 not explained"

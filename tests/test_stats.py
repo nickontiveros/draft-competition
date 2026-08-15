@@ -175,3 +175,23 @@ def test_pending_orders_render_but_do_not_count(player):
     assert stats.bets_placed == 3
     assert stats.total_wagered == pytest.approx(23.0)
     assert stats.win_rate == pytest.approx(50.0)
+
+
+def test_backdate_moves_pre_game_boundary(player):
+    """After backdating past an old bet, it flips from pre-game to in-game."""
+    from app.scoring import backdate_baseline
+
+    with db_session() as db:
+        a = db.query(Account).filter_by(identifier="key-1").first()
+        backdate_baseline(db, a, NOW - timedelta(days=11))  # before the mkt-pre buy
+
+    with db_session() as db:
+        p = db.get(Participant, player)
+        stats = compute_player_stats(db, p)
+
+    by_key = {e.market_key: e for e in stats.entries}
+    # The old Politics bet now counts: settled $60 back on $30 wagered -> won.
+    assert by_key["mkt-pre"].status == "won"
+    assert stats.bets_placed == 4
+    assert stats.total_wagered == pytest.approx(53.0)
+    assert stats.wins == 2

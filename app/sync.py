@@ -99,33 +99,7 @@ async def sync_account(account_id: int) -> None:
         db.add(snapshot)
         db.flush()
 
-        new_fills = 0
-        for f in events:
-            exists = db.scalars(
-                select(Fill.id).where(
-                    Fill.platform == platform, Fill.external_id == f.external_id
-                )
-            ).first()
-            if exists:
-                continue
-            db.add(
-                Fill(
-                    account_id=account_id,
-                    platform=platform,
-                    external_id=f.external_id,
-                    ts=f.ts,
-                    market_title=f.market_title,
-                    outcome=f.outcome,
-                    side=f.side,
-                    size=f.size,
-                    price=f.price,
-                    market_key=f.market_key,
-                    notional=f.notional,
-                    kind=f.kind,
-                    raw_json=json.dumps(f.raw),
-                )
-            )
-            new_fills += 1
+        new_fills = _upsert_fill_rows(db, account_id, platform, events)
 
         # Current API-reported open positions — stored BEFORE the baseline
         # stamp below, because heal_snapshot_positions only trusts ledger
@@ -189,6 +163,61 @@ async def sync_account(account_id: int) -> None:
         for o in orders
     ]
     await _enrich_market_meta(connector, platform, events + order_stubs)
+
+
+def _upsert_fill_rows(
+    db, account_id: int, platform: str, events: list[NormalizedFill]
+) -> int:
+    """Insert fills/settlements not already stored (deduped by platform +
+    external id). Returns how many rows were new."""
+    new_rows = 0
+    for f in events:
+        exists = db.scalars(
+            select(Fill.id).where(
+                Fill.platform == platform, Fill.external_id == f.external_id
+            )
+        ).first()
+        if exists:
+            continue
+        db.add(
+            Fill(
+                account_id=account_id,
+                platform=platform,
+                external_id=f.external_id,
+                ts=f.ts,
+                market_title=f.market_title,
+                outcome=f.outcome,
+                side=f.side,
+                size=f.size,
+                price=f.price,
+                market_key=f.market_key,
+                notional=f.notional,
+                kind=f.kind,
+                raw_json=json.dumps(f.raw),
+            )
+        )
+        new_rows += 1
+    return new_rows
+
+
+async def backfill_history(account_id: int, since: datetime) -> int:
+    """Fetch and store fills + settlements back to `since`, beyond the rolling
+    sync window — used before backdating a baseline so the cash-flow replay
+    has a complete ledger. Raises on connector failure (the caller must not
+    backdate from an incomplete ledger)."""
+    with db_session() as db:
+        account = db.get(Account, account_id)
+        if account is None:
+            return 0
+        platform = account.platform
+        connector = build_connector(account)
+    fills = await connector.fetch_fills(since=since)
+    settlements = await connector.fetch_settlements(since=since)
+    events = fills + settlements
+    with db_session() as db:
+        new_rows = _upsert_fill_rows(db, account_id, platform, events)
+    await _enrich_market_meta(connector, platform, events)
+    return new_rows
 
 
 def _friendly_error(platform: str, exc: Exception) -> str:

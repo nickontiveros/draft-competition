@@ -241,3 +241,75 @@ def with_db_flag_set():
 
     with db_session() as db:
         db.query(Account).first().deposit_flag = "cash +$5.00 not explained"
+
+
+def _pem():
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+
+
+def test_update_credentials(monkeypatch):
+    monkeypatch.setattr(settings, "mock_connectors", True)
+    add(platform="kalshi", identifier="key-old", pem=_pem())
+    aid = _account_id()
+
+    from app.credentials import unseal
+    from app.db import db_session
+    from app.models import Account, Snapshot
+
+    with db_session() as db:
+        db.get(Account, aid).last_sync_error = "Kalshi rejected the API key"
+
+    def update(pem, identifier="", token="tok"):
+        return client.post(
+            f"/admin/accounts/{aid}/credentials",
+            data={"token": token, "private_key_pem": pem, "identifier": identifier},
+            follow_redirects=False,
+        )
+
+    assert update(_pem(), token="nope").status_code == 403
+    resp = update("not a pem at all")
+    assert resp.status_code == 400
+    assert "valid private key" in resp.json()["detail"]
+    with db_session() as db:
+        assert db.get(Account, aid).last_sync_error != ""  # nothing changed
+
+    good = _pem()
+    assert update(good, identifier="key-new").status_code == 303
+    with db_session() as db:
+        account = db.get(Account, aid)
+        snaps = db.query(Snapshot).filter_by(account_id=aid).count()
+        assert unseal(account.credentials) == good.strip()
+        assert account.identifier == "key-new"
+        assert account.last_sync_error == ""
+        assert snaps > 0  # immediate sync ran with the new key
+
+    # Blank identifier keeps the current key ID.
+    assert update(_pem()).status_code == 303
+    with db_session() as db:
+        assert db.get(Account, aid).identifier == "key-new"
+
+
+def test_update_credentials_rejects_polymarket_and_unknown():
+    add()  # polymarket
+    aid = _account_id()
+    resp = client.post(
+        f"/admin/accounts/{aid}/credentials",
+        data={"token": "tok", "private_key_pem": _pem()},
+    )
+    assert resp.status_code == 400
+    assert "Polymarket" in resp.json()["detail"]
+    assert (
+        client.post(
+            "/admin/accounts/999/credentials",
+            data={"token": "tok", "private_key_pem": _pem()},
+        ).status_code
+        == 404
+    )

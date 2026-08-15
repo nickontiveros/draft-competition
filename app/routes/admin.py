@@ -14,7 +14,7 @@ from app.config import settings
 from app.db import db_session
 from app.models import Account, Participant
 from app.scoring import backdate_baseline, lock_baselines, rebaseline_account
-from app.services import create_account, delete_account
+from app.services import create_account, delete_account, update_kalshi_credentials
 from app.sync import FIRST_SYNC_LOOKBACK, backfill_history, sync_account, sync_all
 
 router = APIRouter(prefix="/admin")
@@ -164,6 +164,22 @@ async def rebaseline(
             raise HTTPException(
                 409, "account has no snapshot yet — check its sync error and retry"
             )
+    return RedirectResponse(f"/admin?token={token or x_admin_token}", status_code=303)
+
+
+@router.post("/accounts/{account_id}/credentials")
+async def update_credentials(
+    account_id: int,
+    private_key_pem: str = Form(...),
+    identifier: str = Form(""),
+    token: str = Form(None),
+    x_admin_token: str | None = Header(None),
+):
+    """Fix a mistyped Kalshi API key in place — history and baseline survive.
+    Syncs immediately afterwards so the row proves the new key works."""
+    _check_token(token or x_admin_token)
+    update_kalshi_credentials(account_id, identifier, private_key_pem)
+    await sync_account(account_id)
     return RedirectResponse(f"/admin?token={token or x_admin_token}", status_code=303)
 
 

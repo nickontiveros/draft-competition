@@ -86,6 +86,52 @@ def create_account(
         )
 
 
+def update_kalshi_credentials(
+    account_id: int, identifier: str, private_key_pem: str
+) -> None:
+    """Replace a Kalshi account's API key in place — history, baseline, and
+    fills survive (unlike remove + re-add). Validates the PEM before storing
+    so a bad paste fails immediately instead of as a later sync error."""
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    identifier = identifier.strip()
+    private_key_pem = private_key_pem.strip()
+    if not private_key_pem:
+        raise HTTPException(400, "paste the new private key PEM")
+    try:
+        load_pem_private_key(private_key_pem.encode(), password=None)
+    except Exception:
+        raise HTTPException(
+            400,
+            "that isn't a valid private key — check you pasted the whole file, "
+            "including the -----BEGIN and -----END lines",
+        )
+
+    try:
+        with db_session() as db:
+            account = db.get(Account, account_id)
+            if account is None:
+                raise HTTPException(404, "no such account")
+            if account.platform != "kalshi":
+                raise HTTPException(
+                    400,
+                    "only Kalshi accounts hold credentials — for Polymarket the "
+                    "wallet address is the identity; remove and re-add instead",
+                )
+            if identifier:
+                account.identifier = identifier
+            try:
+                account.credentials = seal(private_key_pem)
+            except Exception as exc:  # invalid CRED_SECRET (must be a Fernet key)
+                raise HTTPException(500, f"CRED_SECRET is misconfigured ({exc})")
+            account.last_sync_error = ""
+            db.flush()
+    except IntegrityError:
+        raise HTTPException(
+            409, f"a kalshi account with identifier {identifier!r} already exists"
+        )
+
+
 def delete_account(account_id: int) -> bool:
     """Remove an account with its snapshots and fills; drop the participant
     if no accounts remain. Returns False if the account doesn't exist."""

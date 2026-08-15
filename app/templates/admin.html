@@ -65,6 +65,18 @@
                        style="width:11rem; display:inline-block">
                 <button class="mini">backdate</button>
               </form>
+              {% if a.platform == "kalshi" %}
+              <form method="post" action="/admin/accounts/{{ a.id }}/credentials" style="margin-bottom:.35rem"
+                    onsubmit="return confirm('Replace the API key for {{ p.name }}? History and baseline are kept; a sync runs immediately with the new key.')">
+                <input type="hidden" name="token" value="{{ token }}">
+                <input name="identifier" placeholder="key ID — blank to keep"
+                       style="width:11rem; display:inline-block; margin-bottom:.2rem">
+                <textarea name="private_key_pem" rows="2" required
+                          placeholder="-----BEGIN PRIVATE KEY-----"
+                          style="width:11rem; display:block; margin-bottom:.2rem"></textarea>
+                <button class="mini">update key</button>
+              </form>
+              {% endif %}
               {% if a.deposit_flag %}
               <form method="post" action="/admin/accounts/{{ a.id }}/clear-flag" style="margin-bottom:.35rem">
                 <input type="hidden" name="token" value="{{ token }}">
